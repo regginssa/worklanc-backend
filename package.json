@@ -1,0 +1,31 @@
+{
+  "name": "talentforge",
+  "version": "1.0.0",
+  "description": "freelancer marketplace",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./index.js",
+    "dev": "nodemon ./index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "freelancer",
+    "job",
+    "hire",
+    "client",
+    "projects",
+    "marketplace"
+  ],
+  "author": "charlieunicornai",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^2.2.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pg": "^8.21.0"
+  }
+}
