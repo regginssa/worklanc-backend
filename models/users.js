@@ -10,14 +10,39 @@ const create = async (user) => {
     password,
     role,
     accountType,
+    signinOption,
+    googleId,
+    appleId,
   } = user;
 
   const result = await pool.query(
     `INSERT INTO users
-    (first_name, last_name, email, country_code, password, role, account_type)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    (
+      first_name,
+      last_name,
+      email,
+      country_code,
+      password,
+      role,
+      account_type,
+      signin_option,
+      google_id,
+      apple_id
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
     RETURNING *`,
-    [firstName, lastName, email, countryCode, password, role, accountType],
+    [
+      firstName,
+      lastName,
+      email,
+      countryCode,
+      password,
+      role,
+      accountType,
+      signinOption,
+      googleId,
+      appleId,
+    ],
   );
 
   return result.rows[0];
@@ -30,8 +55,16 @@ const getAll = async () => {
 };
 
 // GET USER BY ID
-const getOne = async (id) => {
+const getById = async (id) => {
   const result = await pool.query(`SELECT * FROM users WHERE id = $1`, [id]);
+  return result.rows[0];
+};
+
+// GET USER BY EMAIL
+const getByEmail = async (email) => {
+  const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [
+    email,
+  ]);
   return result.rows[0];
 };
 
@@ -57,3 +90,5 @@ const deleteOne = async (id) => {
   await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
   return true;
 };
+
+module.exports = { create, getAll, getById, getByEmail, update, deleteOne };
