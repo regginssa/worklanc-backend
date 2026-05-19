@@ -8,11 +8,11 @@ require("./config/db");
 
 const app = express();
 
-// Middlewares
 app.use(cors());
 app.use(passport.initialize());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(require("./routes"));
 
 const PORT = 5001;
 
