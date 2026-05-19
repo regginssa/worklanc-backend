@@ -32,10 +32,12 @@ const signup = async (req, res) => {
     const token = jwt.sign({ id: newUser.id }, process.env.JWT_SECRET, {
       expiresIn: "3d",
     });
-    res
-      .status(200)
-      .json({ ok: true, data: { token: `Bearer ${token}`, user: newUser } });
+    res.status(200).json({
+      ok: true,
+      data: { token: `Bearer ${token}`, user: format.toCamelCase(newUser) },
+    });
   } catch (e) {
+    console.error("signup error: ", e);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -75,9 +77,10 @@ const signin = async (req, res) => {
     const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
       expiresIn: "3d",
     });
-    res
-      .status(200)
-      .json({ ok: true, data: { token: `Bearer ${token}`, user } });
+    res.status(200).json({
+      ok: true,
+      data: { token: `Bearer ${token}`, user: format.toCamelCase(user) },
+    });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }

@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const { toTitleCase } = require("../utils/format");
 
 // CREATE USER
 const create = async (user) => {
@@ -8,7 +9,7 @@ const create = async (user) => {
     email,
     countryCode,
     password,
-    role,
+    role = "user",
     accountType,
     signinOption,
     googleId,
@@ -32,8 +33,8 @@ const create = async (user) => {
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
     RETURNING *`,
     [
-      firstName,
-      lastName,
+      toTitleCase(firstName),
+      toTitleCase(lastName),
       email,
       countryCode,
       password,

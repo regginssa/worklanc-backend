@@ -12,7 +12,7 @@ app.use(cors());
 app.use(passport.initialize());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(require("./routes"));
+app.use("/api", require("./routes"));
 
 const PORT = 5001;
 
