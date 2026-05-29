@@ -1,73 +1,148 @@
 const Users = require("../models/users");
-const jwt = require("jsonwebtoken");
+const Accounts = require("../models/accounts");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const format = require("../utils/format");
+const {
+  issueToken,
+  toPublicUser,
+  resolveRedirect,
+  pickActiveAccount,
+  firstOnboardingStep,
+  accountStartsCompleted,
+} = require("../utils/auth");
 
-const issueToken = (user) => {
-  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-    expiresIn: "3d",
+const ACCOUNT_TYPES = ["talent", "client"];
+
+// Ensure a user has an account of the given type, creating it if missing.
+const ensureAccount = async (userId, type) => {
+  const existing = await Accounts.getByUserAndType(userId, type);
+  if (existing) return existing;
+
+  return Accounts.create({
+    userId,
+    type,
+    onboardingCompleted: accountStartsCompleted(type),
+    onboardingStep: firstOnboardingStep(type),
   });
+};
+
+// Build the standard auth response: token + sanitized user (with accounts) +
+// the route the client should navigate to next.
+const buildAuthResponse = async (user, { activeAccount, isNewUser }) => {
+  const accounts = await Accounts.getByUserId(user.id);
+  const target =
+    activeAccount &&
+    accounts.find((a) => a.id === activeAccount.id);
 
   return {
-    token: `Bearer ${token}`,
-    user: format.toCamelCase(user),
+    token: issueToken(user),
+    user: toPublicUser(user, accounts),
+    redirectTo: resolveRedirect(target || pickActiveAccount(accounts)),
+    isNewUser: Boolean(isNewUser),
   };
 };
 
+// POST /auth/signup — email + password
 const signup = async (req, res) => {
   try {
-    const { email, password, signinOption } = req.body;
+    const { email, password, firstName, lastName, accountType } = req.body;
+    const countryCode = req.body.countryCode || "US";
+    const marketingOptIn =
+      req.body.marketingOptIn ?? req.body.alert ?? true;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    if (!firstName || !lastName) {
+      return res.status(400).json({ message: "First and last name are required" });
+    }
+
+    if (!ACCOUNT_TYPES.includes(accountType)) {
+      return res.status(400).json({ message: "A valid account type is required" });
+    }
+
     const already = await Users.getByEmail(email);
-    if (already) return res.status(400).json({ message: "You already exist" });
+    if (already) {
+      return res
+        .status(400)
+        .json({ message: "An account with this email already exists" });
+    }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    const newUser = await Users.create({
-      ...req.body,
-      password: hashedPassword,
+    const user = await Users.create({
+      firstName,
+      lastName,
+      email,
+      countryCode,
+      passwordHash,
+      signupProvider: "email",
+      marketingOptIn,
     });
-    const payload = issueToken(newUser);
-    res.status(200).json({ ...payload, isNewUser: true });
+
+    const account = await ensureAccount(user.id, accountType);
+
+    const payload = await buildAuthResponse(user, {
+      activeAccount: account,
+      isNewUser: true,
+    });
+    return res.status(201).json(payload);
   } catch (e) {
     console.error("signup error: ", e);
-    res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
+// POST /auth/signin — email + password
 const signin = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const user = await Users.getByEmail(email);
+    const { email, password, accountType } = req.body;
 
+    const user = await Users.getByEmail(email);
     if (!user) {
       return res.status(400).json({ message: "Account not found" });
     }
 
-    if (user.signin_option !== "email") {
+    if (!user.password_hash) {
       return res.status(400).json({
-        message: `You signed in with ${format.toTitleCase(user.signin_option)}`,
+        message: `This account uses ${format.toTitleCase(
+          user.signup_provider,
+        )} sign in`,
       });
     }
 
-    const matches = await bcrypt.compare(password, user.password);
+    const matches = await bcrypt.compare(password, user.password_hash);
     if (!matches) {
       return res.status(400).json({ message: "Incorrect password" });
     }
 
-    const payload = issueToken(user);
-    res.status(200).json({ ...payload, isNewUser: false });
+    const accounts = await Accounts.getByUserId(user.id);
+    const active = pickActiveAccount(accounts, accountType);
+
+    const payload = await buildAuthResponse(user, {
+      activeAccount: active,
+      isNewUser: false,
+    });
+    return res.status(200).json(payload);
   } catch (e) {
-    res.status(500).json({ message: "Internal server error" });
+    console.error("signin error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
+// POST /auth/oauth — google / apple
+//
+// The frontend performs the provider handshake in-place (popup / one-tap) and
+// posts the decoded profile here. No separate callback page: the response
+// carries `redirectTo`, which is either the next incomplete onboarding step or
+// /dashboard when onboarding is already done.
 const oauth = async (req, res) => {
   try {
     const {
-      signinOption,
-      googleId,
-      appleId,
+      provider,
+      providerId,
       email,
       firstName,
       lastName,
@@ -76,97 +151,118 @@ const oauth = async (req, res) => {
       countryCode = "US",
     } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
-    }
-
-    if (!["google", "apple"].includes(signinOption)) {
+    if (!["google", "apple"].includes(provider)) {
       return res.status(400).json({ message: "Unsupported social provider" });
     }
-
-    const providerId = signinOption === "google" ? googleId : appleId;
     if (!providerId) {
       return res.status(400).json({ message: "Provider id is required" });
     }
-
-    let user =
-      signinOption === "google"
-        ? await Users.getByGoogleId(googleId)
-        : await Users.getByAppleId(appleId);
-
-    if (!user) {
-      user = await Users.getByEmail(email);
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
     }
+    if (intent === "signup" && !ACCOUNT_TYPES.includes(accountType)) {
+      return res
+        .status(400)
+        .json({ message: "A valid account type is required to sign up" });
+    }
+
+    // Find the user by their linked provider id first, then fall back to email
+    // so an existing email user can connect a social provider.
+    let user =
+      provider === "google"
+        ? await Users.getByGoogleId(providerId)
+        : await Users.getByAppleId(providerId);
+
+    if (!user) user = await Users.getByEmail(email);
+
+    let isNewUser = false;
 
     if (!user) {
       if (intent === "login") {
-        return res.status(404).json({
-          message: "Account not found. Please sign up first.",
-        });
+        return res
+          .status(404)
+          .json({ message: "Account not found. Please sign up first." });
       }
 
-      if (!accountType || !["client", "talent"].includes(accountType)) {
-        return res.status(400).json({
-          message: "Account type is required for signup",
-        });
-      }
+      // Social-only signup: no usable password, store a random hash placeholder
+      // so the column stays non-spoofable while password_hash semantics hold.
+      const randomHash = await bcrypt.hash(
+        crypto.randomBytes(32).toString("hex"),
+        10,
+      );
 
-      const randomPassword = crypto.randomBytes(32).toString("hex");
-      const hashedPassword = await bcrypt.hash(randomPassword, 10);
-
-      const newUser = await Users.create({
-        firstName: firstName || "User",
-        lastName: lastName || "",
+      user = await Users.create({
+        firstName: firstName || "WorkLanc",
+        lastName: lastName || "User",
         email,
         countryCode,
-        password: hashedPassword,
-        accountType,
-        signinOption,
-        googleId: signinOption === "google" ? googleId : null,
-        appleId: signinOption === "apple" ? appleId : null,
+        passwordHash: randomHash,
+        signupProvider: provider,
+        googleId: provider === "google" ? providerId : null,
+        appleId: provider === "apple" ? providerId : null,
+        emailVerified: true,
       });
-
-      const payload = issueToken(newUser);
-      return res.status(200).json({ ...payload, isNewUser: true });
-    }
-
-    if (user.signin_option === "email") {
-      return res.status(400).json({
-        message:
-          "An account with this email already exists. Sign in with email instead.",
-      });
-    }
-
-    if (user.signin_option !== signinOption) {
-      return res.status(400).json({
-        message: `Please sign in with ${format.toTitleCase(user.signin_option)}`,
-      });
-    }
-
-    if (signinOption === "google") {
-      if (user.google_id && user.google_id !== googleId) {
-        return res.status(400).json({ message: "Google account mismatch" });
-      }
-      if (!user.google_id) {
-        user = await Users.linkGoogleId(user.id, googleId);
+      isNewUser = true;
+    } else {
+      // Link the provider to the existing identity if not linked yet.
+      if (provider === "google") {
+        if (user.google_id && user.google_id !== providerId) {
+          return res.status(400).json({ message: "Google account mismatch" });
+        }
+        if (!user.google_id) user = await Users.linkGoogleId(user.id, providerId);
+      } else {
+        if (user.apple_id && user.apple_id !== providerId) {
+          return res.status(400).json({ message: "Apple account mismatch" });
+        }
+        if (!user.apple_id) user = await Users.linkAppleId(user.id, providerId);
       }
     }
 
-    if (signinOption === "apple") {
-      if (user.apple_id && user.apple_id !== appleId) {
-        return res.status(400).json({ message: "Apple account mismatch" });
-      }
-      if (!user.apple_id) {
-        user = await Users.linkAppleId(user.id, appleId);
-      }
+    // For signup we guarantee the requested account exists; for login we use
+    // whatever account the user already has.
+    let active;
+    if (intent === "signup") {
+      active = await ensureAccount(user.id, accountType);
+    } else {
+      const accounts = await Accounts.getByUserId(user.id);
+      active = pickActiveAccount(accounts, accountType);
     }
 
-    const payload = issueToken(user);
-    return res.status(200).json({ ...payload, isNewUser: false });
+    const payload = await buildAuthResponse(user, {
+      activeAccount: active,
+      isNewUser,
+    });
+    return res.status(200).json(payload);
   } catch (e) {
     console.error("oauth error: ", e);
-    res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-module.exports = { signin, signup, oauth };
+// GET /auth/me — current identity + accounts (requires auth)
+const me = async (req, res) => {
+  try {
+    const accounts = await Accounts.getByUserId(req.user.id);
+    return res.status(200).json({
+      user: toPublicUser(req.user, accounts),
+      redirectTo: resolveRedirect(pickActiveAccount(accounts)),
+    });
+  } catch (e) {
+    console.error("me error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// PATCH /auth/me — update identity fields (name, contact, address...).
+const updateMe = async (req, res) => {
+  try {
+    const updated = await Users.update(req.user.id, req.body || {});
+    const accounts = await Accounts.getByUserId(updated.id);
+    return res.status(200).json({ user: toPublicUser(updated, accounts) });
+  } catch (e) {
+    console.error("updateMe error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+module.exports = { signup, signin, oauth, me, updateMe };

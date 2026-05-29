@@ -1,70 +1,69 @@
 const pool = require("../config/db");
 const { toTitleCase } = require("../utils/format");
 
-// CREATE USER
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+
+// CREATE USER (login identity only — accounts are created separately)
 const create = async (user) => {
   const {
     firstName,
     lastName,
     email,
-    countryCode,
-    password,
-    role = "user",
-    accountType,
-    signinOption,
-    googleId,
-    appleId,
+    countryCode = "US",
+    passwordHash = null,
+    signupProvider = "email",
+    googleId = null,
+    appleId = null,
+    emailVerified = false,
+    marketingOptIn = true,
   } = user;
 
   const result = await pool.query(
     `INSERT INTO users
-    (
-      first_name,
-      last_name,
-      email,
-      country_code,
-      password,
-      role,
-      account_type,
-      signin_option,
-      google_id,
-      apple_id
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-    RETURNING *`,
+      (
+        first_name,
+        last_name,
+        email,
+        password_hash,
+        country_code,
+        signup_provider,
+        google_id,
+        apple_id,
+        email_verified,
+        marketing_opt_in
+      )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING *`,
     [
       toTitleCase(firstName),
       toTitleCase(lastName),
-      email,
+      normalizeEmail(email),
+      passwordHash,
       countryCode,
-      password,
-      role,
-      accountType,
-      signinOption,
+      signupProvider,
       googleId,
       appleId,
+      emailVerified,
+      marketingOptIn,
     ],
   );
 
   return result.rows[0];
 };
 
-// GET ALL USERS
 const getAll = async () => {
-  const result = await pool.query(`SELECT * FROM users`);
+  const result = await pool.query(`SELECT * FROM users ORDER BY created_at DESC`);
   return result.rows;
 };
 
-// GET USER BY ID
 const getById = async (id) => {
   const result = await pool.query(`SELECT * FROM users WHERE id = $1`, [id]);
   return result.rows[0];
 };
 
-// GET USER BY EMAIL
 const getByEmail = async (email) => {
   const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [
-    email,
+    normalizeEmail(email),
   ]);
   return result.rows[0];
 };
@@ -99,24 +98,56 @@ const linkAppleId = async (id, appleId) => {
   return result.rows[0];
 };
 
-// UPDATE USER
-const update = async (id, data) => {
-  const { first_name, last_name, country_code } = data;
+// UPDATE basic identity fields (partial — only provided keys are touched)
+const update = async (id, data = {}) => {
+  const fieldMap = {
+    firstName: "first_name",
+    lastName: "last_name",
+    countryCode: "country_code",
+    phone: "phone",
+    phoneVerified: "phone_verified",
+    emailVerified: "email_verified",
+    dateOfBirth: "date_of_birth",
+    streetAddress: "street_address",
+    aptSuite: "apt_suite",
+    city: "city",
+    state: "state",
+    zipCode: "zip_code",
+    timezone: "timezone",
+    marketingOptIn: "marketing_opt_in",
+  };
 
+  const sets = [];
+  const values = [];
+  let i = 1;
+
+  for (const [key, column] of Object.entries(fieldMap)) {
+    if (data[key] === undefined) continue;
+    let value = data[key];
+    if (key === "firstName" || key === "lastName") value = toTitleCase(value);
+    sets.push(`${column} = $${i++}`);
+    values.push(value);
+  }
+
+  if (sets.length === 0) return getById(id);
+
+  values.push(id);
   const result = await pool.query(
-    `UPDATE users
-     SET first_name = $1,
-         last_name = $2,
-         country_code = $3
-     WHERE id = $4
-     RETURNING *`,
-    [first_name, last_name, country_code, id],
+    `UPDATE users SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+    values,
   );
 
   return result.rows[0];
 };
 
-// DELETE USER
+const setPasswordHash = async (id, passwordHash) => {
+  const result = await pool.query(
+    `UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING *`,
+    [passwordHash, id],
+  );
+  return result.rows[0];
+};
+
 const deleteOne = async (id) => {
   await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
   return true;
@@ -132,5 +163,7 @@ module.exports = {
   linkGoogleId,
   linkAppleId,
   update,
+  setPasswordHash,
   deleteOne,
+  normalizeEmail,
 };
