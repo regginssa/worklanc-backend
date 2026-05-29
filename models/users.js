@@ -69,6 +69,36 @@ const getByEmail = async (email) => {
   return result.rows[0];
 };
 
+const getByGoogleId = async (googleId) => {
+  const result = await pool.query(`SELECT * FROM users WHERE google_id = $1`, [
+    googleId,
+  ]);
+  return result.rows[0];
+};
+
+const getByAppleId = async (appleId) => {
+  const result = await pool.query(`SELECT * FROM users WHERE apple_id = $1`, [
+    appleId,
+  ]);
+  return result.rows[0];
+};
+
+const linkGoogleId = async (id, googleId) => {
+  const result = await pool.query(
+    `UPDATE users SET google_id = $1 WHERE id = $2 RETURNING *`,
+    [googleId, id],
+  );
+  return result.rows[0];
+};
+
+const linkAppleId = async (id, appleId) => {
+  const result = await pool.query(
+    `UPDATE users SET apple_id = $1 WHERE id = $2 RETURNING *`,
+    [appleId, id],
+  );
+  return result.rows[0];
+};
+
 // UPDATE USER
 const update = async (id, data) => {
   const { first_name, last_name, country_code } = data;
@@ -92,4 +122,15 @@ const deleteOne = async (id) => {
   return true;
 };
 
-module.exports = { create, getAll, getById, getByEmail, update, deleteOne };
+module.exports = {
+  create,
+  getAll,
+  getById,
+  getByEmail,
+  getByGoogleId,
+  getByAppleId,
+  linkGoogleId,
+  linkAppleId,
+  update,
+  deleteOne,
+};

@@ -1,7 +1,19 @@
 const Users = require("../models/users");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const format = require("../utils/format");
+
+const issueToken = (user) => {
+  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+    expiresIn: "3d",
+  });
+
+  return {
+    token: `Bearer ${token}`,
+    user: format.toCamelCase(user),
+  };
+};
 
 const signup = async (req, res) => {
   try {
@@ -15,12 +27,8 @@ const signup = async (req, res) => {
       ...req.body,
       password: hashedPassword,
     });
-    const token = jwt.sign({ id: newUser.id }, process.env.JWT_SECRET, {
-      expiresIn: "3d",
-    });
-    res
-      .status(200)
-      .json({ token: `Bearer ${token}`, user: format.toCamelCase(newUser) });
+    const payload = issueToken(newUser);
+    res.status(200).json({ ...payload, isNewUser: true });
   } catch (e) {
     console.error("signup error: ", e);
     res.status(500).json({ message: "Internal server error" });
@@ -32,21 +40,23 @@ const signin = async (req, res) => {
     const { email, password } = req.body;
     const user = await Users.getByEmail(email);
 
-    if (user.signin_option !== "email")
+    if (!user) {
+      return res.status(400).json({ message: "Account not found" });
+    }
+
+    if (user.signin_option !== "email") {
       return res.status(400).json({
         message: `You signed in with ${format.toTitleCase(user.signin_option)}`,
       });
+    }
 
     const matches = await bcrypt.compare(password, user.password);
-    if (!matches)
+    if (!matches) {
       return res.status(400).json({ message: "Incorrect password" });
+    }
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-      expiresIn: "3d",
-    });
-    res
-      .status(200)
-      .json({ token: `Bearer ${token}`, user: format.toCamelCase(user) });
+    const payload = issueToken(user);
+    res.status(200).json({ ...payload, isNewUser: false });
   } catch (e) {
     res.status(500).json({ message: "Internal server error" });
   }
@@ -54,56 +64,105 @@ const signin = async (req, res) => {
 
 const oauth = async (req, res) => {
   try {
-    const { signinOption, googleId, appleId, email } = req.body;
+    const {
+      signinOption,
+      googleId,
+      appleId,
+      email,
+      firstName,
+      lastName,
+      intent = "login",
+      accountType,
+      countryCode = "US",
+    } = req.body;
 
-    const user = await Users.getByEmail(email);
-    let hashedPassword,
-      matches = false,
-      token;
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    if (!["google", "apple"].includes(signinOption)) {
+      return res.status(400).json({ message: "Unsupported social provider" });
+    }
+
+    const providerId = signinOption === "google" ? googleId : appleId;
+    if (!providerId) {
+      return res.status(400).json({ message: "Provider id is required" });
+    }
+
+    let user =
+      signinOption === "google"
+        ? await Users.getByGoogleId(googleId)
+        : await Users.getByAppleId(appleId);
 
     if (!user) {
-      switch (signinOption) {
-        case "google":
-          hashedPassword = await bcrypt.hash(googleId, 10);
-          break;
-        case "apple":
-          hashedPassword = await bcrypt.hash(appleId, 10);
-          break;
-        default:
-          return res.status(400).json({ message: "No supported social" });
+      user = await Users.getByEmail(email);
+    }
+
+    if (!user) {
+      if (intent === "login") {
+        return res.status(404).json({
+          message: "Account not found. Please sign up first.",
+        });
       }
 
+      if (!accountType || !["client", "talent"].includes(accountType)) {
+        return res.status(400).json({
+          message: "Account type is required for signup",
+        });
+      }
+
+      const randomPassword = crypto.randomBytes(32).toString("hex");
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
       const newUser = await Users.create({
-        ...req.body,
+        firstName: firstName || "User",
+        lastName: lastName || "",
+        email,
+        countryCode,
         password: hashedPassword,
+        accountType,
+        signinOption,
+        googleId: signinOption === "google" ? googleId : null,
+        appleId: signinOption === "apple" ? appleId : null,
       });
-      token = jwt.sign({ id: newUser.id }, process.env.JWT_SECRET, {
-        expiresIn: "3d",
-      });
-      return res
-        .status(200)
-        .json({ token: `Bearer ${token}`, user: format.toCamelCase(newUser) });
+
+      const payload = issueToken(newUser);
+      return res.status(200).json({ ...payload, isNewUser: true });
     }
 
-    switch (signinOption) {
-      case "google":
-        matches = await bcrypt.compare(googleId, user.password);
-        break;
-      case "apple":
-        matches = await bcrypt.compare(appleId, user.password);
-        break;
-      default:
-        return res.status(400).json({ message: "No supported social" });
+    if (user.signin_option === "email") {
+      return res.status(400).json({
+        message:
+          "An account with this email already exists. Sign in with email instead.",
+      });
     }
 
-    if (!matches)
-      return res.status(400).json({ message: "Incorrect social account" });
-    token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-      expiresIn: "3d",
-    });
-    res
-      .status(200)
-      .json({ token: `Bearer ${token}`, user: format.toCamelCase(user) });
+    if (user.signin_option !== signinOption) {
+      return res.status(400).json({
+        message: `Please sign in with ${format.toTitleCase(user.signin_option)}`,
+      });
+    }
+
+    if (signinOption === "google") {
+      if (user.google_id && user.google_id !== googleId) {
+        return res.status(400).json({ message: "Google account mismatch" });
+      }
+      if (!user.google_id) {
+        user = await Users.linkGoogleId(user.id, googleId);
+      }
+    }
+
+    if (signinOption === "apple") {
+      if (user.apple_id && user.apple_id !== appleId) {
+        return res.status(400).json({ message: "Apple account mismatch" });
+      }
+      if (!user.apple_id) {
+        user = await Users.linkAppleId(user.id, appleId);
+      }
+    }
+
+    const payload = issueToken(user);
+    return res.status(200).json({ ...payload, isNewUser: false });
   } catch (e) {
     console.error("oauth error: ", e);
     res.status(500).json({ message: "Internal server error" });
