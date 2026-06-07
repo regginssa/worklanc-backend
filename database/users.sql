@@ -63,6 +63,9 @@ CREATE TABLE users (
     email_verified    BOOLEAN NOT NULL DEFAULT FALSE,
     phone             VARCHAR(32),
     phone_verified    BOOLEAN NOT NULL DEFAULT FALSE,
+    id_verified       BOOLEAN NOT NULL DEFAULT FALSE,
+    -- NULL = not declared; TRUE/FALSE once the user opts in or out.
+    is_military_veteran BOOLEAN,
 
     -- Identity-level personal / contact details (shared across all of the
     -- user's accounts; collected in the onboarding "location" step and used
@@ -102,6 +105,8 @@ CREATE TRIGGER trg_users_updated_at
 COMMENT ON TABLE users IS 'Login identity + authentication. Account roles live in accounts.';
 COMMENT ON COLUMN users.password_hash IS 'NULL for social-only logins.';
 COMMENT ON COLUMN users.signup_provider IS 'Provider used at first sign-up: email | google | apple.';
+COMMENT ON COLUMN users.id_verified IS 'Government-ID verification completed.';
+COMMENT ON COLUMN users.is_military_veteran IS 'Self-declared military veteran status; NULL when not set.';
 
 -- ---------------------------------------------------------------------------
 -- accounts: a user can hold one talent AND one client account
