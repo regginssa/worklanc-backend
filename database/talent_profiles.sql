@@ -1,9 +1,12 @@
 -- WorkLanc: talent profile tables (the freelancer-facing profile data)
--- Run order in pgAdmin:
---   1. users.sql        (users + accounts)
---   2. categories.sql   (categories)
---   3. skills.sql       (skills)
---   4. talent_profiles.sql   <-- this file
+-- Run order in pgAdmin (fresh install):
+--   1. users.sql              (users + accounts + generate_public_uid())
+--   2. categories.sql         (categories)
+--   3. skills.sql             (skills)
+--   4. talent_profiles.sql    <-- this file
+--
+-- Existing database with talent data?
+--   Run patch_users_accounts.sql instead of re-running users.sql.
 --
 -- Why these live here and NOT on `users`
 -- --------------------------------------
@@ -39,6 +42,7 @@ DROP TABLE IF EXISTS talent_profiles CASCADE;
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_profiles (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     account_id          BIGINT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
 
     kind                VARCHAR(10) NOT NULL DEFAULT 'individual',
@@ -81,6 +85,7 @@ CREATE TABLE talent_profiles (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_profiles_uid_unique UNIQUE (uid),
     CONSTRAINT talent_profiles_kind_valid
         CHECK (kind IN ('individual', 'agency')),
     CONSTRAINT talent_profiles_account_kind_unique UNIQUE (account_id, kind),
@@ -110,6 +115,7 @@ CREATE TABLE talent_profiles (
                                      'as_needed', 'none'))
 );
 
+CREATE INDEX idx_talent_profiles_uid ON talent_profiles (uid);
 CREATE INDEX idx_talent_profiles_account_id ON talent_profiles (account_id);
 CREATE INDEX idx_talent_profiles_category_id ON talent_profiles (category_id);
 
@@ -118,6 +124,7 @@ CREATE TRIGGER trg_talent_profiles_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMENT ON TABLE talent_profiles IS 'Freelancer profile (individual/agency) for a talent account.';
+COMMENT ON COLUMN talent_profiles.uid IS 'Public profile ID for /freelancers/:uid URLs.';
 COMMENT ON COLUMN talent_profiles.hours_per_week IS 'Availability: more_than_30 | less_than_30 | as_needed | none.';
 COMMENT ON COLUMN talent_profiles.open_to_contract_to_hire IS 'Whether the talent is open to contract-to-hire roles; NULL when unset.';
 COMMENT ON COLUMN talent_profiles.video_intro_url IS 'URL of the talent video introduction.';
@@ -142,15 +149,18 @@ COMMENT ON TABLE talent_specialties IS '1-3 specialty subcategories per talent p
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_skills (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
     skill_id            BIGINT REFERENCES skills (id) ON DELETE SET NULL,
     name                VARCHAR(255) NOT NULL,
     sort_order          INTEGER NOT NULL DEFAULT 0,
 
+    CONSTRAINT talent_skills_uid_unique UNIQUE (uid),
     CONSTRAINT talent_skills_unique UNIQUE (talent_profile_id, name),
     CONSTRAINT talent_skills_name_not_empty CHECK (char_length(trim(name)) > 0)
 );
 
+CREATE INDEX idx_talent_skills_uid ON talent_skills (uid);
 CREATE INDEX idx_talent_skills_profile ON talent_skills (talent_profile_id);
 
 COMMENT ON TABLE talent_skills IS 'Self-reported skills (max 15) per talent profile.';
@@ -160,6 +170,7 @@ COMMENT ON TABLE talent_skills IS 'Self-reported skills (max 15) per talent prof
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_employment (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     title               VARCHAR(255) NOT NULL,
@@ -173,9 +184,12 @@ CREATE TABLE talent_employment (
     sort_order          INTEGER NOT NULL DEFAULT 0,
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT talent_employment_uid_unique UNIQUE (uid)
 );
 
+CREATE INDEX idx_talent_employment_uid ON talent_employment (uid);
 CREATE INDEX idx_talent_employment_profile ON talent_employment (talent_profile_id);
 
 CREATE TRIGGER trg_talent_employment_updated_at
@@ -189,6 +203,7 @@ COMMENT ON TABLE talent_employment IS 'Work history entries per talent profile.'
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_education (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     school              VARCHAR(255) NOT NULL,
@@ -200,9 +215,12 @@ CREATE TABLE talent_education (
     sort_order          INTEGER NOT NULL DEFAULT 0,
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT talent_education_uid_unique UNIQUE (uid)
 );
 
+CREATE INDEX idx_talent_education_uid ON talent_education (uid);
 CREATE INDEX idx_talent_education_profile ON talent_education (talent_profile_id);
 
 CREATE TRIGGER trg_talent_education_updated_at
@@ -216,17 +234,20 @@ COMMENT ON TABLE talent_education IS 'Education history entries per talent profi
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_languages (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     name                VARCHAR(100) NOT NULL,
     level               VARCHAR(20) NOT NULL,
     sort_order          INTEGER NOT NULL DEFAULT 0,
 
+    CONSTRAINT talent_languages_uid_unique UNIQUE (uid),
     CONSTRAINT talent_languages_unique UNIQUE (talent_profile_id, name),
     CONSTRAINT talent_languages_level_valid
         CHECK (level IN ('basic', 'conversational', 'fluent', 'native'))
 );
 
+CREATE INDEX idx_talent_languages_uid ON talent_languages (uid);
 CREATE INDEX idx_talent_languages_profile ON talent_languages (talent_profile_id);
 
 COMMENT ON TABLE talent_languages IS 'Languages and proficiency per talent profile.';
@@ -236,6 +257,7 @@ COMMENT ON TABLE talent_languages IS 'Languages and proficiency per talent profi
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_certifications (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     name                VARCHAR(255) NOT NULL,
@@ -251,12 +273,14 @@ CREATE TABLE talent_certifications (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_certifications_uid_unique UNIQUE (uid),
     CONSTRAINT talent_certifications_name_not_empty
         CHECK (char_length(trim(name)) > 0),
     CONSTRAINT talent_certifications_provider_not_empty
         CHECK (char_length(trim(provider)) > 0)
 );
 
+CREATE INDEX idx_talent_certifications_uid ON talent_certifications (uid);
 CREATE INDEX idx_talent_certifications_profile
     ON talent_certifications (talent_profile_id);
 
@@ -271,6 +295,7 @@ COMMENT ON TABLE talent_certifications IS 'Professional certifications per talen
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_other_experiences (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     subject             VARCHAR(255) NOT NULL,
@@ -280,10 +305,12 @@ CREATE TABLE talent_other_experiences (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_other_experiences_uid_unique UNIQUE (uid),
     CONSTRAINT talent_other_experiences_subject_not_empty
         CHECK (char_length(trim(subject)) > 0)
 );
 
+CREATE INDEX idx_talent_other_experiences_uid ON talent_other_experiences (uid);
 CREATE INDEX idx_talent_other_experiences_profile
     ON talent_other_experiences (talent_profile_id);
 
@@ -298,6 +325,7 @@ COMMENT ON TABLE talent_other_experiences IS 'Other experience entries (subject 
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_licenses (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     profession          VARCHAR(255) NOT NULL,
@@ -311,6 +339,7 @@ CREATE TABLE talent_licenses (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_licenses_uid_unique UNIQUE (uid),
     CONSTRAINT talent_licenses_profession_not_empty
         CHECK (char_length(trim(profession)) > 0),
     CONSTRAINT talent_licenses_jurisdiction_not_empty
@@ -319,6 +348,7 @@ CREATE TABLE talent_licenses (
         CHECK (char_length(trim(license_number)) > 0)
 );
 
+CREATE INDEX idx_talent_licenses_uid ON talent_licenses (uid);
 CREATE INDEX idx_talent_licenses_profile ON talent_licenses (talent_profile_id);
 
 CREATE TRIGGER trg_talent_licenses_updated_at
@@ -332,6 +362,7 @@ COMMENT ON TABLE talent_licenses IS 'Professional licenses per talent profile.';
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_portfolios (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     title               VARCHAR(255) NOT NULL,
@@ -343,12 +374,14 @@ CREATE TABLE talent_portfolios (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_portfolios_uid_unique UNIQUE (uid),
     CONSTRAINT talent_portfolios_title_not_empty
         CHECK (char_length(trim(title)) > 0),
     CONSTRAINT talent_portfolios_status_valid
         CHECK (status IN ('published', 'draft'))
 );
 
+CREATE INDEX idx_talent_portfolios_uid ON talent_portfolios (uid);
 CREATE INDEX idx_talent_portfolios_profile ON talent_portfolios (talent_profile_id);
 CREATE INDEX idx_talent_portfolios_status ON talent_portfolios (talent_profile_id, status);
 
@@ -360,16 +393,19 @@ COMMENT ON TABLE talent_portfolios IS 'Portfolio projects per talent profile.';
 
 CREATE TABLE talent_portfolio_skills (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     portfolio_id        BIGINT NOT NULL REFERENCES talent_portfolios (id) ON DELETE CASCADE,
     skill_id            BIGINT REFERENCES skills (id) ON DELETE SET NULL,
     name                VARCHAR(255) NOT NULL,
     sort_order          INTEGER NOT NULL DEFAULT 0,
 
+    CONSTRAINT talent_portfolio_skills_uid_unique UNIQUE (uid),
     CONSTRAINT talent_portfolio_skills_unique UNIQUE (portfolio_id, name),
     CONSTRAINT talent_portfolio_skills_name_not_empty
         CHECK (char_length(trim(name)) > 0)
 );
 
+CREATE INDEX idx_talent_portfolio_skills_uid ON talent_portfolio_skills (uid);
 CREATE INDEX idx_talent_portfolio_skills_portfolio
     ON talent_portfolio_skills (portfolio_id);
 
@@ -377,6 +413,7 @@ COMMENT ON TABLE talent_portfolio_skills IS 'Skills tagged on a portfolio projec
 
 CREATE TABLE talent_portfolio_assets (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     portfolio_id        BIGINT NOT NULL REFERENCES talent_portfolios (id) ON DELETE CASCADE,
 
     asset_type          VARCHAR(10) NOT NULL,
@@ -394,6 +431,7 @@ CREATE TABLE talent_portfolio_assets (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_portfolio_assets_uid_unique UNIQUE (uid),
     CONSTRAINT talent_portfolio_assets_type_valid
         CHECK (asset_type IN ('image', 'pdf', 'video', 'text', 'link', 'audio')),
     CONSTRAINT talent_portfolio_assets_payload_valid
@@ -405,6 +443,7 @@ CREATE TABLE talent_portfolio_assets (
         )
 );
 
+CREATE INDEX idx_talent_portfolio_assets_uid ON talent_portfolio_assets (uid);
 CREATE INDEX idx_talent_portfolio_assets_portfolio
     ON talent_portfolio_assets (portfolio_id);
 
@@ -419,6 +458,7 @@ COMMENT ON TABLE talent_portfolio_assets IS 'Media/text/link assets attached to 
 -- ---------------------------------------------------------------------------
 CREATE TABLE talent_testimonials (
     id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
     talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
 
     client_first_name   VARCHAR(255) NOT NULL,
@@ -437,6 +477,7 @@ CREATE TABLE talent_testimonials (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT talent_testimonials_uid_unique UNIQUE (uid),
     CONSTRAINT talent_testimonials_client_first_name_not_empty
         CHECK (char_length(trim(client_first_name)) > 0),
     CONSTRAINT talent_testimonials_client_last_name_not_empty
@@ -447,6 +488,7 @@ CREATE TABLE talent_testimonials (
         CHECK (status IN ('pending', 'submitted', 'verified', 'declined'))
 );
 
+CREATE INDEX idx_talent_testimonials_uid ON talent_testimonials (uid);
 CREATE INDEX idx_talent_testimonials_profile ON talent_testimonials (talent_profile_id);
 CREATE INDEX idx_talent_testimonials_status ON talent_testimonials (talent_profile_id, status);
 

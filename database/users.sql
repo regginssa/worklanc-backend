@@ -1,6 +1,18 @@
 -- WorkLanc: users (login identity) + accounts (talent/client) tables
 -- Run this file in pgAdmin. Independent of categories.sql / skills.sql.
 --
+-- ⚠️  WHEN TO USE WHICH SCRIPT
+-- ----------------------------
+-- users.sql (this file)
+--   Fresh / empty database ONLY. Drops and recreates users + accounts.
+--   If talent_profiles already exists, DROP accounts CASCADE removes its FK
+--   (you will see a NOTICE) — re-run talent_profiles.sql afterwards, or use
+--   patch_users_accounts.sql instead to keep talent_* data.
+--
+-- patch_users_accounts.sql
+--   Safe upgrade on an existing database. Adds columns (uid, membership_tier,
+--   etc.) without dropping any table. Use this when talent_* tables must stay.
+--
 -- Design notes
 -- ------------
 -- A single login identity lives in `users`. Authentication data only
@@ -37,11 +49,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Opaque public identifier for URLs and external APIs (32-char hex).
+-- Internal BIGINT `id` columns stay for joins; never expose them in URLs.
+CREATE OR REPLACE FUNCTION generate_public_uid()
+RETURNS TEXT AS $$
+BEGIN
+    RETURN replace(gen_random_uuid()::text, '-', '');
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
 -- ---------------------------------------------------------------------------
 -- users: login identity + auth
 -- ---------------------------------------------------------------------------
 CREATE TABLE users (
     id                BIGSERIAL PRIMARY KEY,
+    uid               TEXT NOT NULL DEFAULT generate_public_uid(),
 
     first_name        VARCHAR(255) NOT NULL,
     last_name         VARCHAR(255) NOT NULL,
@@ -84,6 +106,7 @@ CREATE TABLE users (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT users_uid_unique UNIQUE (uid),
     CONSTRAINT users_email_unique UNIQUE (email),
     CONSTRAINT users_google_id_unique UNIQUE (google_id),
     CONSTRAINT users_apple_id_unique UNIQUE (apple_id),
@@ -94,6 +117,7 @@ CREATE TABLE users (
     CONSTRAINT users_last_name_not_empty CHECK (char_length(trim(last_name)) > 0)
 );
 
+CREATE INDEX idx_users_uid ON users (uid);
 CREATE INDEX idx_users_email ON users (email);
 CREATE INDEX idx_users_google_id ON users (google_id) WHERE google_id IS NOT NULL;
 CREATE INDEX idx_users_apple_id ON users (apple_id) WHERE apple_id IS NOT NULL;
@@ -103,6 +127,7 @@ CREATE TRIGGER trg_users_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMENT ON TABLE users IS 'Login identity + authentication. Account roles live in accounts.';
+COMMENT ON COLUMN users.uid IS 'Public opaque ID; use in URLs instead of id.';
 COMMENT ON COLUMN users.password_hash IS 'NULL for social-only logins.';
 COMMENT ON COLUMN users.signup_provider IS 'Provider used at first sign-up: email | google | apple.';
 COMMENT ON COLUMN users.id_verified IS 'Government-ID verification completed.';
@@ -113,9 +138,14 @@ COMMENT ON COLUMN users.is_military_veteran IS 'Self-declared military veteran s
 -- ---------------------------------------------------------------------------
 CREATE TABLE accounts (
     id                    BIGSERIAL PRIMARY KEY,
+    uid                   TEXT NOT NULL DEFAULT generate_public_uid(),
     user_id               BIGINT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
     type                  VARCHAR(10) NOT NULL,
+
+    -- Subscription tier (same values for talent and client accounts).
+    -- UI labels differ by account type (e.g. "Freelancer Plus" vs "Business Plus").
+    membership_tier       VARCHAR(10) NOT NULL DEFAULT 'basic',
 
     onboarding_completed  BOOLEAN NOT NULL DEFAULT FALSE,
     -- Next onboarding route to resume at. NULL once onboarding is completed.
@@ -124,10 +154,14 @@ CREATE TABLE accounts (
     created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CONSTRAINT accounts_uid_unique UNIQUE (uid),
     CONSTRAINT accounts_type_valid CHECK (type IN ('talent', 'client')),
+    CONSTRAINT accounts_membership_tier_valid
+        CHECK (membership_tier IN ('basic', 'plus')),
     CONSTRAINT accounts_user_type_unique UNIQUE (user_id, type)
 );
 
+CREATE INDEX idx_accounts_uid ON accounts (uid);
 CREATE INDEX idx_accounts_user_id ON accounts (user_id);
 
 CREATE TRIGGER trg_accounts_updated_at
@@ -135,6 +169,8 @@ CREATE TRIGGER trg_accounts_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 COMMENT ON TABLE accounts IS 'Talent/Client accounts owned by a single user identity.';
+COMMENT ON COLUMN accounts.uid IS 'Public opaque ID; use in URLs instead of id.';
+COMMENT ON COLUMN accounts.membership_tier IS 'Subscription tier: basic | plus (shared by talent and client).';
 COMMENT ON COLUMN accounts.onboarding_step IS 'Next route to resume onboarding; NULL when completed.';
 
 COMMIT;

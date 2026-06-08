@@ -15,6 +15,16 @@ const SCALAR_COLUMNS = {
   importSource: "import_source",
 };
 
+const getByUid = async (uid) => {
+  const result = await pool.query(
+    `SELECT id FROM talent_profiles WHERE uid = $1`,
+    [uid],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return getFull(row.id);
+};
+
 const getRawByAccount = async (accountId, kind = "individual") => {
   const result = await pool.query(
     `SELECT * FROM talent_profiles WHERE account_id = $1 AND kind = $2`,
@@ -207,25 +217,25 @@ const getFull = async (profileId) => {
         [profileId],
       ),
       pool.query(
-        `SELECT id, name FROM talent_skills
+        `SELECT id, uid, skill_id, name, sort_order FROM talent_skills
          WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
         [profileId],
       ),
       pool.query(
-        `SELECT title, company, city, country, started_at, end_at,
+        `SELECT uid, title, company, city, country, started_at, end_at,
                 is_current, description
          FROM talent_employment
          WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
         [profileId],
       ),
       pool.query(
-        `SELECT school, degree, field_of_study, started_year, end_year, description
+        `SELECT uid, school, degree, field_of_study, started_year, end_year, description
          FROM talent_education
          WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
         [profileId],
       ),
       pool.query(
-        `SELECT name, level FROM talent_languages
+        `SELECT uid, name, level FROM talent_languages
          WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
         [profileId],
       ),
@@ -233,6 +243,7 @@ const getFull = async (profileId) => {
 
   const profile = {
     id: row.id,
+    uid: row.uid,
     account_id: row.account_id,
     kind: row.kind,
     title: row.title,
@@ -261,6 +272,7 @@ const getFull = async (profileId) => {
 };
 
 module.exports = {
+  getByUid,
   getRawByAccount,
   ensureForAccount,
   updateScalars,

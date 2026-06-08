@@ -53,7 +53,9 @@ const pickActiveAccount = (accounts = [], preferredType) => {
 
 const toPublicAccount = (account) => ({
   id: account.id,
+  uid: account.uid,
   type: account.type,
+  membershipTier: account.membership_tier ?? "basic",
   onboardingCompleted: account.onboarding_completed,
   onboardingStep: account.onboarding_step,
   createdAt: account.created_at,
@@ -62,6 +64,7 @@ const toPublicAccount = (account) => ({
 // Strip secrets and expose only client-safe identity fields.
 const toPublicUser = (user, accounts = []) => ({
   id: user.id,
+  uid: user.uid,
   firstName: user.first_name,
   lastName: user.last_name,
   email: user.email,
