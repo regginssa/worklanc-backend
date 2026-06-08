@@ -485,7 +485,7 @@ CREATE TABLE talent_testimonials (
     CONSTRAINT talent_testimonials_client_email_not_empty
         CHECK (char_length(trim(client_email)) > 0),
     CONSTRAINT talent_testimonials_status_valid
-        CHECK (status IN ('pending', 'submitted', 'verified', 'declined'))
+        CHECK (status IN ('pending', 'confirmed', 'declined'))
 );
 
 CREATE INDEX idx_talent_testimonials_uid ON talent_testimonials (uid);

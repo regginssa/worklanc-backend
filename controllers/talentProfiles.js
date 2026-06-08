@@ -1,6 +1,8 @@
 const Accounts = require("../models/accounts");
 const TalentProfiles = require("../models/talentProfiles");
+const Testimonials = require("../models/testimonials");
 const Users = require("../models/users");
+const { sendTestimonialRequestEmail } = require("../utils/testimonialEmail");
 const UserMilitaryService = require("../models/userMilitaryService");
 const {
   toPublicAccount,
@@ -78,6 +80,39 @@ const patchMine = async (req, res) => {
     }
     if (body.licenses !== undefined) {
       await TalentProfiles.replaceLicenses(profile.id, body.licenses);
+    }
+    if (body.testimonialRequest !== undefined) {
+      const request = body.testimonialRequest;
+      if (
+        !request?.clientFirstName?.trim() ||
+        !request?.clientLastName?.trim() ||
+        !request?.clientEmail?.trim() ||
+        !request?.requestMessage?.trim()
+      ) {
+        return res
+          .status(400)
+          .json({ message: "Testimonial request details are required" });
+      }
+
+      const testimonial = await TalentProfiles.createTestimonial(
+        profile.id,
+        request,
+      );
+      const talentUser = await Users.getByAccountId(profile.account_id);
+      const talentName = talentUser
+        ? `${talentUser.first_name} ${talentUser.last_name}`.trim()
+        : "A WorkLanc freelancer";
+      const frontendBase =
+        process.env.FRONTEND_URL || "http://localhost:3000";
+      const confirmUrl = `${frontendBase}/testimonials/confirm/${testimonial.uid}`;
+
+      await sendTestimonialRequestEmail({
+        clientEmail: request.clientEmail.trim(),
+        clientFirstName: request.clientFirstName.trim(),
+        talentName,
+        requestMessage: request.requestMessage.trim(),
+        confirmUrl,
+      });
     }
 
     // Onboarding progress lives on the account (drives redirect/guard logic).
@@ -162,4 +197,84 @@ const getFreelancerByUid = async (req, res) => {
   }
 };
 
-module.exports = { getMine, patchMine, getFreelancerByUid };
+const toPublicTestimonialRequest = (row) => ({
+  uid: row.uid,
+  status: row.status,
+  clientFirstName: row.client_first_name,
+  clientLastName: row.client_last_name,
+  clientTitle: row.client_title,
+  projectType: row.project_type,
+  requestMessage: row.request_message,
+  testimonialText: row.testimonial_text,
+  talentFirstName: row.talent_first_name,
+  talentLastName: row.talent_last_name,
+  talentTitle: row.talent_title,
+  talentProfileUid: row.talent_profile_uid,
+});
+
+// GET /talent/testimonials/:uid — public client response page.
+const getTestimonialRequest = async (req, res) => {
+  try {
+    const row = await Testimonials.getByUid(req.params.uid);
+    if (!row) {
+      return res.status(404).json({ message: "Testimonial request not found" });
+    }
+
+    return res.status(200).json({
+      testimonial: toPublicTestimonialRequest(row),
+    });
+  } catch (e) {
+    console.error("talent.getTestimonialRequest error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// POST /talent/testimonials/:uid/respond — client confirms or declines.
+const respondToTestimonial = async (req, res) => {
+  try {
+    const { action, testimonialText } = req.body || {};
+
+    if (!["confirm", "decline"].includes(action)) {
+      return res.status(400).json({ message: "Action must be confirm or decline" });
+    }
+
+    if (action === "confirm" && !testimonialText?.trim()) {
+      return res
+        .status(400)
+        .json({ message: "Testimonial text is required to confirm" });
+    }
+
+    const status = action === "confirm" ? "confirmed" : "declined";
+    const updated = await Testimonials.respond(req.params.uid, {
+      status,
+      testimonialText: testimonialText?.trim() || null,
+    });
+
+    if (!updated) {
+      const existing = await Testimonials.getByUid(req.params.uid);
+      if (!existing) {
+        return res.status(404).json({ message: "Testimonial request not found" });
+      }
+      return res.status(409).json({
+        message: "This testimonial request has already been responded to",
+        status: existing.status,
+      });
+    }
+
+    return res.status(200).json({
+      status: updated.status,
+      testimonialText: updated.testimonial_text,
+    });
+  } catch (e) {
+    console.error("talent.respondToTestimonial error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+module.exports = {
+  getMine,
+  patchMine,
+  getFreelancerByUid,
+  getTestimonialRequest,
+  respondToTestimonial,
+};

@@ -434,6 +434,48 @@ const getFull = async (profileId) => {
   return toCamelCase(profile);
 };
 
+const createTestimonial = async (profileId, item) => {
+  const {
+    clientFirstName,
+    clientLastName,
+    clientEmail,
+    clientLinkedinUrl,
+    clientTitle,
+    projectType,
+    requestMessage,
+  } = item;
+
+  const orderResult = await pool.query(
+    `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order
+     FROM talent_testimonials
+     WHERE talent_profile_id = $1`,
+    [profileId],
+  );
+  const sortOrder = orderResult.rows[0]?.next_order ?? 0;
+
+  const result = await pool.query(
+    `INSERT INTO talent_testimonials
+      (talent_profile_id, client_first_name, client_last_name, client_email,
+       client_linkedin_url, client_title, project_type, request_message,
+       status, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+     RETURNING *`,
+    [
+      profileId,
+      clientFirstName.trim(),
+      clientLastName.trim(),
+      clientEmail.trim().toLowerCase(),
+      clientLinkedinUrl?.trim() || null,
+      clientTitle?.trim() || null,
+      projectType?.trim() || null,
+      requestMessage?.trim() || null,
+      sortOrder,
+    ],
+  );
+
+  return result.rows[0];
+};
+
 const getRawByUid = async (uid, kind = "individual") => {
   const result = await pool.query(
     `SELECT * FROM talent_profiles WHERE uid = $1 AND kind = $2`,
@@ -456,5 +498,6 @@ module.exports = {
   replaceCertifications,
   replaceOtherExperiences,
   replaceLicenses,
+  createTestimonial,
   getFull,
 };

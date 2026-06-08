@@ -4,6 +4,8 @@ const requireAuth = require("../middleware/requireAuth");
 const optionalAuth = require("../middleware/optionalAuth");
 
 router.get("/freelancers/:uid", optionalAuth, controllers.getFreelancerByUid);
+router.get("/testimonials/:uid", controllers.getTestimonialRequest);
+router.post("/testimonials/:uid/respond", controllers.respondToTestimonial);
 router.get("/profile", requireAuth, controllers.getMine);
 router.patch("/profile", requireAuth, controllers.patchMine);
 
