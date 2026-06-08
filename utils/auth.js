@@ -77,6 +77,7 @@ const toPublicUser = (user, accounts = []) => ({
   phoneVerified: user.phone_verified,
   idVerified: user.id_verified,
   isMilitaryVeteran: user.is_military_veteran ?? null,
+  militaryVeteranDeclined: Boolean(user.military_veteran_declined),
   avatarUrl: user.avatar_url || null,
   dateOfBirth: user.date_of_birth || null,
   streetAddress: user.street_address || null,
@@ -90,8 +91,30 @@ const toPublicUser = (user, accounts = []) => ({
   accounts: accounts.map(toPublicAccount),
 });
 
+const toPublicMilitaryService = (row, { includePrivateFields = false } = {}) => {
+  if (!row) return null;
+
+  const service = {
+    country: row.country,
+    countryCode: row.country_code,
+    branch: row.branch,
+  };
+
+  if (includePrivateFields) {
+    return {
+      ...service,
+      firstName: row.service_first_name,
+      lastName: row.service_last_name,
+      activeDutyStartDate: row.active_duty_start_date,
+      activeDutyEndDate: row.active_duty_end_date,
+    };
+  }
+
+  return service;
+};
+
 // Public freelancer card fields for /freelancers/:uid (no email).
-const toPublicFreelancer = (user) => ({
+const toPublicFreelancer = (user, militaryService = null) => ({
   uid: user.uid,
   firstName: user.first_name,
   lastName: user.last_name,
@@ -102,6 +125,8 @@ const toPublicFreelancer = (user) => ({
   phoneVerified: user.phone_verified,
   idVerified: user.id_verified,
   isMilitaryVeteran: user.is_military_veteran ?? null,
+  militaryVeteranDeclined: Boolean(user.military_veteran_declined),
+  militaryService,
 });
 
 const issueToken = (user) =>
@@ -110,6 +135,7 @@ const issueToken = (user) =>
   })}`;
 
 module.exports = {
+  toPublicMilitaryService,
   DASHBOARD_PATH,
   TALENT_ONBOARDING_STEPS,
   firstOnboardingStep,

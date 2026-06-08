@@ -88,6 +88,8 @@ CREATE TABLE users (
     id_verified       BOOLEAN NOT NULL DEFAULT FALSE,
     -- NULL = not declared; TRUE/FALSE once the user opts in or out.
     is_military_veteran BOOLEAN,
+    -- TRUE when the user chose not to disclose veteran status.
+    military_veteran_declined BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- Identity-level personal / contact details (shared across all of the
     -- user's accounts; collected in the onboarding "location" step and used
@@ -135,6 +137,7 @@ COMMENT ON COLUMN users.password_hash IS 'NULL for social-only logins.';
 COMMENT ON COLUMN users.signup_provider IS 'Provider used at first sign-up: email | google | apple.';
 COMMENT ON COLUMN users.id_verified IS 'Government-ID verification completed.';
 COMMENT ON COLUMN users.is_military_veteran IS 'Self-declared military veteran status; NULL when not set.';
+COMMENT ON COLUMN users.military_veteran_declined IS 'TRUE when the user chose not to disclose veteran status.';
 COMMENT ON COLUMN users.avatar_url IS 'Encrypted S3 token for the user profile photo.';
 
 -- ---------------------------------------------------------------------------

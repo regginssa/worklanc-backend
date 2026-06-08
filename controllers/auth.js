@@ -1,5 +1,6 @@
 const Users = require("../models/users");
 const Accounts = require("../models/accounts");
+const UserMilitaryService = require("../models/userMilitaryService");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const format = require("../utils/format");
@@ -253,13 +254,122 @@ const me = async (req, res) => {
   }
 };
 
+const MILITARY_BRANCHES = new Set([
+  "army_and_ground_forces",
+  "navy_coast_guard_and_marine_forces",
+  "air_force",
+  "space_force",
+]);
+
+const applyMilitaryVeteranUpdate = async (userId, militaryVeteran) => {
+  const { status } = militaryVeteran || {};
+  if (!status) {
+    throw new Error("Military veteran status is required");
+  }
+
+  if (status === "served") {
+    const {
+      country,
+      countryCode,
+      firstName,
+      lastName,
+      activeDutyStartDate,
+      activeDutyEndDate,
+      branch,
+    } = militaryVeteran;
+
+    if (
+      !country?.trim() ||
+      !countryCode?.trim() ||
+      !firstName?.trim() ||
+      !lastName?.trim() ||
+      !activeDutyStartDate ||
+      !activeDutyEndDate ||
+      !branch
+    ) {
+      throw new Error("Military service details are required");
+    }
+
+    if (!MILITARY_BRANCHES.has(branch)) {
+      throw new Error("Invalid military service branch");
+    }
+
+    if (new Date(activeDutyEndDate) < new Date(activeDutyStartDate)) {
+      throw new Error("Active duty end date must be on or after start date");
+    }
+
+    await Users.update(userId, {
+      isMilitaryVeteran: true,
+      militaryVeteranDeclined: false,
+    });
+    await UserMilitaryService.upsert(userId, {
+      country,
+      countryCode,
+      firstName,
+      lastName,
+      activeDutyStartDate,
+      activeDutyEndDate,
+      branch,
+    });
+    return;
+  }
+
+  if (status === "not_served") {
+    await Users.update(userId, {
+      isMilitaryVeteran: false,
+      militaryVeteranDeclined: false,
+    });
+    await UserMilitaryService.deleteByUserId(userId);
+    return;
+  }
+
+  if (status === "declined") {
+    await Users.update(userId, {
+      isMilitaryVeteran: null,
+      militaryVeteranDeclined: true,
+    });
+    await UserMilitaryService.deleteByUserId(userId);
+    return;
+  }
+
+  if (status === "unset") {
+    await Users.update(userId, {
+      isMilitaryVeteran: null,
+      militaryVeteranDeclined: false,
+    });
+    await UserMilitaryService.deleteByUserId(userId);
+    return;
+  }
+
+  throw new Error("Invalid military veteran status");
+};
+
 // PATCH /auth/me — update identity fields (name, contact, address...).
 const updateMe = async (req, res) => {
   try {
-    const updated = await Users.update(req.user.id, req.body || {});
+    const body = req.body || {};
+    const { militaryVeteran, ...identityPatch } = body;
+
+    if (militaryVeteran !== undefined) {
+      await applyMilitaryVeteranUpdate(req.user.id, militaryVeteran);
+    }
+
+    const updated =
+      Object.keys(identityPatch).length > 0
+        ? await Users.update(req.user.id, identityPatch)
+        : await Users.getById(req.user.id);
     const accounts = await Accounts.getByUserId(updated.id);
     return res.status(200).json({ user: toPublicUser(updated, accounts) });
   } catch (e) {
+    if (
+      e.message === "Military veteran status is required" ||
+      e.message === "Military service details are required" ||
+      e.message === "Invalid military service branch" ||
+      e.message === "Active duty end date must be on or after start date" ||
+      e.message === "Invalid military veteran status"
+    ) {
+      return res.status(400).json({ message: e.message });
+    }
     console.error("updateMe error: ", e);
     return res.status(500).json({ message: "Internal server error" });
   }

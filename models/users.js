@@ -116,6 +116,8 @@ const update = async (id, data = {}) => {
     timezone: "timezone",
     avatarUrl: "avatar_url",
     marketingOptIn: "marketing_opt_in",
+    isMilitaryVeteran: "is_military_veteran",
+    militaryVeteranDeclined: "military_veteran_declined",
   };
 
   const sets = [];

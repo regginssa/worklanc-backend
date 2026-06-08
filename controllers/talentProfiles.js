@@ -1,9 +1,11 @@
 const Accounts = require("../models/accounts");
 const TalentProfiles = require("../models/talentProfiles");
 const Users = require("../models/users");
+const UserMilitaryService = require("../models/userMilitaryService");
 const {
   toPublicAccount,
   toPublicFreelancer,
+  toPublicMilitaryService,
   resolveRedirect,
 } = require("../utils/auth");
 
@@ -140,10 +142,18 @@ const getFreelancerByUid = async (req, res) => {
     }
 
     const profile = await TalentProfiles.getFull(raw.id);
+    const militaryServiceRow = user.is_military_veteran
+      ? await UserMilitaryService.getByUserId(user.id)
+      : null;
 
     return res.status(200).json({
       profile,
-      freelancer: toPublicFreelancer(user),
+      freelancer: toPublicFreelancer(
+        user,
+        toPublicMilitaryService(militaryServiceRow, {
+          includePrivateFields: isOwner,
+        }),
+      ),
       isOwner,
     });
   } catch (e) {
