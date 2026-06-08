@@ -100,6 +100,9 @@ CREATE TABLE users (
     zip_code          VARCHAR(32),
     timezone          VARCHAR(64),
 
+    -- Encrypted S3 media token (see upload/asset API). Identity-level avatar.
+    avatar_url        TEXT,
+
     -- "Send me helpful emails / job leads" opt-in from sign-up.
     marketing_opt_in  BOOLEAN NOT NULL DEFAULT TRUE,
 
@@ -132,6 +135,7 @@ COMMENT ON COLUMN users.password_hash IS 'NULL for social-only logins.';
 COMMENT ON COLUMN users.signup_provider IS 'Provider used at first sign-up: email | google | apple.';
 COMMENT ON COLUMN users.id_verified IS 'Government-ID verification completed.';
 COMMENT ON COLUMN users.is_military_veteran IS 'Self-declared military veteran status; NULL when not set.';
+COMMENT ON COLUMN users.avatar_url IS 'Encrypted S3 token for the user profile photo.';
 
 -- ---------------------------------------------------------------------------
 -- accounts: a user can hold one talent AND one client account

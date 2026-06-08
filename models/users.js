@@ -114,6 +114,7 @@ const update = async (id, data = {}) => {
     state: "state",
     zipCode: "zip_code",
     timezone: "timezone",
+    avatarUrl: "avatar_url",
     marketingOptIn: "marketing_opt_in",
   };
 
