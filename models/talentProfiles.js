@@ -13,6 +13,9 @@ const SCALAR_COLUMNS = {
   projectPreference: "project_preference",
   photoUrl: "photo_url",
   importSource: "import_source",
+  videoIntroUrl: "video_intro_url",
+  hoursPerWeek: "hours_per_week",
+  openToContractToHire: "open_to_contract_to_hire",
 };
 
 const getByUid = async (uid) => {
@@ -176,6 +179,88 @@ const replaceEducation = async (profileId, items = []) => {
   }
 };
 
+const replaceCertifications = async (profileId, items = []) => {
+  await pool.query(
+    `DELETE FROM talent_certifications WHERE talent_profile_id = $1`,
+    [profileId],
+  );
+
+  let order = 0;
+  for (const item of items) {
+    if (!item?.name?.trim() || !item?.provider?.trim()) continue;
+    await pool.query(
+      `INSERT INTO talent_certifications
+        (talent_profile_id, name, provider, provider_logo_url, issued_date,
+         expiration_date, description, credential_id, credential_url, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        profileId,
+        item.name.trim(),
+        item.provider.trim(),
+        item.providerLogoUrl ?? null,
+        item.issuedDate,
+        item.expirationDate ?? null,
+        item.description ?? null,
+        item.credentialId ?? null,
+        item.credentialUrl ?? null,
+        order++,
+      ],
+    );
+  }
+};
+
+const replaceOtherExperiences = async (profileId, items = []) => {
+  await pool.query(
+    `DELETE FROM talent_other_experiences WHERE talent_profile_id = $1`,
+    [profileId],
+  );
+
+  let order = 0;
+  for (const item of items) {
+    if (!item?.subject?.trim()) continue;
+    await pool.query(
+      `INSERT INTO talent_other_experiences
+        (talent_profile_id, subject, description, sort_order)
+       VALUES ($1,$2,$3,$4)`,
+      [profileId, item.subject.trim(), item.description ?? null, order++],
+    );
+  }
+};
+
+const replaceLicenses = async (profileId, items = []) => {
+  await pool.query(
+    `DELETE FROM talent_licenses WHERE talent_profile_id = $1`,
+    [profileId],
+  );
+
+  let order = 0;
+  for (const item of items) {
+    if (
+      !item?.profession?.trim() ||
+      !item?.jurisdiction?.trim() ||
+      !item?.licenseNumber?.trim()
+    ) {
+      continue;
+    }
+    await pool.query(
+      `INSERT INTO talent_licenses
+        (talent_profile_id, profession, jurisdiction, license_number,
+         verification_url, issued_date, expiration_date, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        profileId,
+        item.profession.trim(),
+        item.jurisdiction.trim(),
+        item.licenseNumber.trim(),
+        item.verificationUrl ?? null,
+        item.issuedDate,
+        item.expirationDate ?? null,
+        order++,
+      ],
+    );
+  }
+};
+
 const replaceLanguages = async (profileId, items = []) => {
   await pool.query(
     `DELETE FROM talent_languages WHERE talent_profile_id = $1`,
@@ -206,8 +291,18 @@ const getFull = async (profileId) => {
   const row = profileResult.rows[0];
   if (!row) return null;
 
-  const [specialties, skills, employment, education, languages] =
-    await Promise.all([
+  const [
+    specialties,
+    skills,
+    employment,
+    education,
+    languages,
+    certifications,
+    otherExperiences,
+    licenses,
+    portfolios,
+    testimonials,
+  ] = await Promise.all([
       pool.query(
         `SELECT c.name, c.slug
          FROM talent_specialties ts
@@ -239,7 +334,67 @@ const getFull = async (profileId) => {
          WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
         [profileId],
       ),
+      pool.query(
+        `SELECT uid, name, provider, provider_logo_url, issued_date,
+                expiration_date, description, credential_id, credential_url
+         FROM talent_certifications
+         WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
+        [profileId],
+      ),
+      pool.query(
+        `SELECT uid, subject, description
+         FROM talent_other_experiences
+         WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
+        [profileId],
+      ),
+      pool.query(
+        `SELECT uid, profession, jurisdiction, license_number, verification_url,
+                issued_date, expiration_date
+         FROM talent_licenses
+         WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
+        [profileId],
+      ),
+      pool.query(
+        `SELECT id, uid, title, role, description, status
+         FROM talent_portfolios
+         WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
+        [profileId],
+      ),
+      pool.query(
+        `SELECT uid, client_first_name, client_last_name, client_email,
+                client_linkedin_url, client_title, project_type, request_message,
+                testimonial_text, status
+         FROM talent_testimonials
+         WHERE talent_profile_id = $1 ORDER BY sort_order ASC`,
+        [profileId],
+      ),
     ]);
+
+  const portfolioRows = await Promise.all(
+    portfolios.rows.map(async (portfolio) => {
+      const [portfolioSkills, portfolioAssets] = await Promise.all([
+        pool.query(
+          `SELECT uid, skill_id, name FROM talent_portfolio_skills
+           WHERE portfolio_id = $1 ORDER BY sort_order ASC`,
+          [portfolio.id],
+        ),
+        pool.query(
+          `SELECT uid, asset_type, file_url, file_name, mime_type, text_content,
+                  link_url, link_title
+           FROM talent_portfolio_assets
+           WHERE portfolio_id = $1 ORDER BY sort_order ASC`,
+          [portfolio.id],
+        ),
+      ]);
+
+      const { id: _id, ...publicPortfolio } = portfolio;
+      return {
+        ...publicPortfolio,
+        skills: portfolioSkills.rows,
+        assets: portfolioAssets.rows,
+      };
+    }),
+  );
 
   const profile = {
     id: row.id,
@@ -260,19 +415,36 @@ const getFull = async (profileId) => {
     photo_url: row.photo_url,
     import_source: row.import_source,
     onboarding_completed: row.onboarding_completed,
+    video_intro_url: row.video_intro_url,
+    hours_per_week: row.hours_per_week,
+    open_to_contract_to_hire: row.open_to_contract_to_hire,
     created_at: row.created_at,
     specialties: specialties.rows,
     skills: skills.rows,
     employment: employment.rows,
     education: education.rows,
     languages: languages.rows,
+    certifications: certifications.rows,
+    other_experiences: otherExperiences.rows,
+    licenses: licenses.rows,
+    portfolios: portfolioRows,
+    testimonials: testimonials.rows,
   };
 
   return toCamelCase(profile);
 };
 
+const getRawByUid = async (uid, kind = "individual") => {
+  const result = await pool.query(
+    `SELECT * FROM talent_profiles WHERE uid = $1 AND kind = $2`,
+    [uid, kind],
+  );
+  return result.rows[0] || null;
+};
+
 module.exports = {
   getByUid,
+  getRawByUid,
   getRawByAccount,
   ensureForAccount,
   updateScalars,
@@ -281,5 +453,8 @@ module.exports = {
   replaceEmployment,
   replaceEducation,
   replaceLanguages,
+  replaceCertifications,
+  replaceOtherExperiences,
+  replaceLicenses,
   getFull,
 };

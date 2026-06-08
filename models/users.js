@@ -154,6 +154,22 @@ const deleteOne = async (id) => {
   return true;
 };
 
+const getByAccountId = async (accountId) => {
+  const result = await pool.query(
+    `SELECT u.*
+     FROM users u
+     INNER JOIN accounts a ON a.user_id = u.id
+     WHERE a.id = $1`,
+    [accountId],
+  );
+  return result.rows[0] || null;
+};
+
+const getByUid = async (uid) => {
+  const result = await pool.query(`SELECT * FROM users WHERE uid = $1`, [uid]);
+  return result.rows[0] || null;
+};
+
 module.exports = {
   create,
   getAll,
@@ -161,6 +177,8 @@ module.exports = {
   getByEmail,
   getByGoogleId,
   getByAppleId,
+  getByAccountId,
+  getByUid,
   linkGoogleId,
   linkAppleId,
   update,

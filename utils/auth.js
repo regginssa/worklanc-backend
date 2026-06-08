@@ -90,6 +90,20 @@ const toPublicUser = (user, accounts = []) => ({
   accounts: accounts.map(toPublicAccount),
 });
 
+// Public freelancer card fields for /freelancers/:uid (no email).
+const toPublicFreelancer = (user) => ({
+  uid: user.uid,
+  firstName: user.first_name,
+  lastName: user.last_name,
+  avatarUrl: user.avatar_url || null,
+  city: user.city || null,
+  countryCode: user.country_code,
+  timezone: user.timezone || null,
+  phoneVerified: user.phone_verified,
+  idVerified: user.id_verified,
+  isMilitaryVeteran: user.is_military_veteran ?? null,
+});
+
 const issueToken = (user) =>
   `Bearer ${jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
     expiresIn: "3d",
@@ -104,5 +118,6 @@ module.exports = {
   pickActiveAccount,
   toPublicAccount,
   toPublicUser,
+  toPublicFreelancer,
   issueToken,
 };

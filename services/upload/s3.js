@@ -1,6 +1,7 @@
 const {
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
 } = require("@aws-sdk/client-s3");
 const s3Client = require("../../config/s3Client");
 
@@ -32,6 +33,16 @@ const getObjectFromS3 = async (key) => {
   return result;
 };
 
+const deleteObjectFromS3 = async (key) => {
+  await s3Client.send(
+    new DeleteObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    }),
+  );
+  return key;
+};
+
 /** @deprecated Prefer uploadBufferToS3 + encrypted URLs instead of public links. */
 const uploadToS3 = async (params) => {
   try {
@@ -44,4 +55,9 @@ const uploadToS3 = async (params) => {
   }
 };
 
-module.exports = { uploadToS3, uploadBufferToS3, getObjectFromS3 };
+module.exports = {
+  uploadToS3,
+  uploadBufferToS3,
+  getObjectFromS3,
+  deleteObjectFromS3,
+};

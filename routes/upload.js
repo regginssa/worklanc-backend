@@ -24,4 +24,6 @@ router.post(
 
 router.get("/asset/:token", controllers.serveMedia);
 
+router.delete("/:token", requireAuth, controllers.deleteMedia);
+
 module.exports = router;

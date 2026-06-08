@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const {
   uploadBufferToS3,
   getObjectFromS3,
+  deleteObjectFromS3,
 } = require("../services/upload/s3");
 const { encryptS3Key, decryptS3Key } = require("../utils/mediaCrypto");
 const { resolveExtension, resolvePurpose } = require("../middleware/mediaUpload");
@@ -83,4 +84,44 @@ const serveMedia = async (req, res) => {
   }
 };
 
-module.exports = { uploadMedia, serveMedia, buildAssetPath };
+const ALLOWED_PURPOSES = new Set(["avatar", "portfolio", "asset"]);
+
+const assertUserOwnsObjectKey = (objectKey, userId) => {
+  const [purpose, ownerId] = objectKey.split("/");
+  if (!ALLOWED_PURPOSES.has(purpose)) {
+    throw new Error("Invalid asset purpose");
+  }
+  if (String(ownerId) !== String(userId)) {
+    throw new Error("Forbidden");
+  }
+};
+
+// DELETE /upload/:token — remove a previously uploaded object owned by the user.
+const deleteMedia = async (req, res) => {
+  try {
+    const { token } = req.params;
+    if (!token) {
+      return res.status(400).json({ message: "Missing asset token" });
+    }
+
+    const objectKey = decryptS3Key(token);
+    assertUserOwnsObjectKey(objectKey, req.user.id);
+    await deleteObjectFromS3(objectKey);
+
+    return res.status(200).json({ deleted: true });
+  } catch (error) {
+    console.error("deleteMedia error: ", error);
+    if (error.message === "Invalid media token") {
+      return res.status(400).json({ message: "Invalid asset token" });
+    }
+    if (error.message === "Forbidden") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (error.message === "Invalid asset purpose") {
+      return res.status(400).json({ message: "Invalid asset" });
+    }
+    return res.status(500).json({ message: "Delete failed" });
+  }
+};
+
+module.exports = { uploadMedia, serveMedia, deleteMedia, buildAssetPath };
