@@ -375,4 +375,14 @@ const updateMe = async (req, res) => {
   }
 };
 
-module.exports = { signup, signin, oauth, me, updateMe };
+// POST /auth/logout — client-side JWT logout acknowledgement.
+const logout = async (_req, res) => {
+  try {
+    return res.status(200).json({ message: "Logged out successfully" });
+  } catch (e) {
+    console.error("logout error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+module.exports = { signup, signin, oauth, me, updateMe, logout };

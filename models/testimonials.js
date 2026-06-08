@@ -28,11 +28,8 @@ const getByUid = async (uid) => {
 const respond = async (uid, { status, testimonialText = null }) => {
   const result = await pool.query(
     `UPDATE talent_testimonials
-     SET status = $2,
-         testimonial_text = CASE
-           WHEN $2 = 'confirmed' THEN $3
-           ELSE testimonial_text
-         END
+     SET status = $2::varchar,
+         testimonial_text = COALESCE($3::text, testimonial_text)
      WHERE uid = $1 AND status = 'pending'
      RETURNING uid, status, testimonial_text`,
     [uid, status, testimonialText],
