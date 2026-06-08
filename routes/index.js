@@ -6,5 +6,6 @@ router.use("/talent", require("./talent"));
 router.use("/categories", require("./categories"));
 router.use("/profile", require("./profile"));
 router.use("/upload", require("./upload"));
+router.use("/geocoding", require("./geocoding"));
 
 module.exports = router;
