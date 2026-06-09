@@ -6,7 +6,7 @@
 --   4. talent_profiles.sql    <-- this file
 --
 -- Existing database with talent data?
---   Run patch_users_accounts.sql instead of re-running users.sql.
+--   Run patch_all.sql (single file) instead of re-running this script.
 --
 -- Why these live here and NOT on `users`
 -- --------------------------------------
@@ -367,7 +367,7 @@ CREATE TABLE talent_portfolios (
 
     title               VARCHAR(255) NOT NULL,
     role                VARCHAR(255),
-    description         TEXT,
+    description         TEXT NOT NULL,
     status              VARCHAR(10) NOT NULL DEFAULT 'published',
     sort_order          INTEGER NOT NULL DEFAULT 0,
 
@@ -377,6 +377,8 @@ CREATE TABLE talent_portfolios (
     CONSTRAINT talent_portfolios_uid_unique UNIQUE (uid),
     CONSTRAINT talent_portfolios_title_not_empty
         CHECK (char_length(trim(title)) > 0),
+    CONSTRAINT talent_portfolios_description_not_empty
+        CHECK (char_length(trim(description)) > 0),
     CONSTRAINT talent_portfolios_status_valid
         CHECK (status IN ('published', 'draft'))
 );
@@ -409,7 +411,8 @@ CREATE INDEX idx_talent_portfolio_skills_uid ON talent_portfolio_skills (uid);
 CREATE INDEX idx_talent_portfolio_skills_portfolio
     ON talent_portfolio_skills (portfolio_id);
 
-COMMENT ON TABLE talent_portfolio_skills IS 'Skills tagged on a portfolio project.';
+COMMENT ON TABLE talent_portfolio_skills IS
+    'Skills and deliverables tagged on a portfolio project.';
 
 CREATE TABLE talent_portfolio_assets (
     id                  BIGSERIAL PRIMARY KEY,
@@ -421,7 +424,11 @@ CREATE TABLE talent_portfolio_assets (
     file_url            TEXT,
     file_name           VARCHAR(255),
     mime_type           VARCHAR(127),
-    -- Text asset body (when asset_type = text).
+    -- Text asset (when asset_type = text).
+    -- text_format = markdown  -> text_content holds markdown body.
+    -- text_format = plain     -> text_heading + text_content (description).
+    text_format         VARCHAR(10),
+    text_heading        VARCHAR(255),
     text_content        TEXT,
     -- External link asset (when asset_type = link).
     link_url            TEXT,
@@ -434,12 +441,27 @@ CREATE TABLE talent_portfolio_assets (
     CONSTRAINT talent_portfolio_assets_uid_unique UNIQUE (uid),
     CONSTRAINT talent_portfolio_assets_type_valid
         CHECK (asset_type IN ('image', 'pdf', 'video', 'text', 'link', 'audio')),
+    CONSTRAINT talent_portfolio_assets_text_format_valid
+        CHECK (text_format IS NULL OR text_format IN ('markdown', 'plain')),
     CONSTRAINT talent_portfolio_assets_payload_valid
         CHECK (
             (asset_type IN ('image', 'pdf', 'video', 'audio')
              AND file_url IS NOT NULL)
-            OR (asset_type = 'text' AND text_content IS NOT NULL)
             OR (asset_type = 'link' AND link_url IS NOT NULL)
+            OR (
+                asset_type = 'text'
+                AND text_format = 'markdown'
+                AND text_content IS NOT NULL
+                AND char_length(trim(text_content)) > 0
+            )
+            OR (
+                asset_type = 'text'
+                AND text_format = 'plain'
+                AND text_heading IS NOT NULL
+                AND char_length(trim(text_heading)) > 0
+                AND text_content IS NOT NULL
+                AND char_length(trim(text_content)) > 0
+            )
         )
 );
 

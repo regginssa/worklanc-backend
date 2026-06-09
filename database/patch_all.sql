@@ -1,0 +1,339 @@
+-- WorkLanc: single incremental patch for an EXISTING database
+-- ---------------------------------------------------------------------------
+-- Run this ONE file in pgAdmin when schema changes fail if applied separately.
+-- Safe to re-run. Does NOT drop users, accounts, or talent_profiles.
+--
+-- Fresh empty database? Use instead:
+--   1. users.sql
+--   2. categories.sql
+--   3. skills.sql
+--   4. talent_profiles.sql
+--
+-- WARNING: Section 6 drops and recreates portfolio tables (data loss for
+-- portfolios only). Testimonials and all other talent data are preserved.
+
+BEGIN;
+
+-- ===========================================================================
+-- 1. Shared helpers
+-- ===========================================================================
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION generate_public_uid()
+RETURNS TEXT AS $$
+BEGIN
+    RETURN replace(gen_random_uuid()::text, '-', '');
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+-- ===========================================================================
+-- 2. users + accounts
+-- ===========================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS uid TEXT;
+UPDATE users SET uid = generate_public_uid() WHERE uid IS NULL;
+ALTER TABLE users ALTER COLUMN uid SET DEFAULT generate_public_uid();
+ALTER TABLE users ALTER COLUMN uid SET NOT NULL;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS id_verified BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_military_veteran BOOLEAN;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS military_veteran_declined BOOLEAN NOT NULL DEFAULT FALSE;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'users_uid_unique'
+    ) THEN
+        ALTER TABLE users ADD CONSTRAINT users_uid_unique UNIQUE (uid);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_users_uid ON users (uid);
+
+DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
+CREATE TRIGGER trg_users_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON COLUMN users.military_veteran_declined IS
+    'TRUE when the user chose not to disclose veteran status.';
+
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS uid TEXT;
+UPDATE accounts SET uid = generate_public_uid() WHERE uid IS NULL;
+ALTER TABLE accounts ALTER COLUMN uid SET DEFAULT generate_public_uid();
+ALTER TABLE accounts ALTER COLUMN uid SET NOT NULL;
+
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS membership_tier VARCHAR(10);
+UPDATE accounts SET membership_tier = 'basic' WHERE membership_tier IS NULL;
+ALTER TABLE accounts ALTER COLUMN membership_tier SET DEFAULT 'basic';
+ALTER TABLE accounts ALTER COLUMN membership_tier SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'accounts_uid_unique'
+    ) THEN
+        ALTER TABLE accounts ADD CONSTRAINT accounts_uid_unique UNIQUE (uid);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'accounts_membership_tier_valid'
+    ) THEN
+        ALTER TABLE accounts ADD CONSTRAINT accounts_membership_tier_valid
+            CHECK (membership_tier IN ('basic', 'plus'));
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_accounts_uid ON accounts (uid);
+
+DROP TRIGGER IF EXISTS trg_accounts_updated_at ON accounts;
+CREATE TRIGGER trg_accounts_updated_at
+    BEFORE UPDATE ON accounts
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'talent_profiles'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'talent_profiles_account_id_fkey'
+    ) THEN
+        ALTER TABLE talent_profiles
+            ADD CONSTRAINT talent_profiles_account_id_fkey
+            FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+-- ===========================================================================
+-- 3. Military veteran service
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS user_military_service (
+    id                      BIGSERIAL PRIMARY KEY,
+    user_id                 BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    country                 VARCHAR(255) NOT NULL,
+    country_code            VARCHAR(2) NOT NULL DEFAULT 'US',
+    service_first_name      VARCHAR(255) NOT NULL,
+    service_last_name       VARCHAR(255) NOT NULL,
+    active_duty_start_date  DATE NOT NULL,
+    active_duty_end_date    DATE NOT NULL,
+    branch                  VARCHAR(64) NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT user_military_service_user_unique UNIQUE (user_id),
+    CONSTRAINT user_military_service_branch_valid
+        CHECK (branch IN (
+            'army_and_ground_forces',
+            'navy_coast_guard_and_marine_forces',
+            'air_force',
+            'space_force'
+        )),
+    CONSTRAINT user_military_service_dates_valid
+        CHECK (active_duty_end_date >= active_duty_start_date)
+);
+
+ALTER TABLE user_military_service
+    ADD COLUMN IF NOT EXISTS country_code VARCHAR(2);
+
+UPDATE user_military_service
+SET country_code = 'US'
+WHERE country_code IS NULL;
+
+ALTER TABLE user_military_service
+    ALTER COLUMN country_code SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_user_military_service_user_id
+    ON user_military_service (user_id);
+
+DROP TRIGGER IF EXISTS trg_user_military_service_updated_at ON user_military_service;
+CREATE TRIGGER trg_user_military_service_updated_at
+    BEFORE UPDATE ON user_military_service
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON COLUMN user_military_service.country_code IS
+    'ISO 3166-1 alpha-2 country code for the service country.';
+
+-- ===========================================================================
+-- 4. talent_profiles availability
+-- ===========================================================================
+ALTER TABLE talent_profiles
+    ADD COLUMN IF NOT EXISTS hours_per_week VARCHAR(20);
+
+ALTER TABLE talent_profiles
+    ADD COLUMN IF NOT EXISTS open_to_contract_to_hire BOOLEAN;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'talent_profiles_hours_per_week_valid'
+    ) THEN
+        ALTER TABLE talent_profiles
+            ADD CONSTRAINT talent_profiles_hours_per_week_valid
+            CHECK (hours_per_week IS NULL
+                   OR hours_per_week IN ('more_than_30', 'less_than_30',
+                                         'as_needed', 'none'));
+    END IF;
+END $$;
+
+COMMENT ON COLUMN talent_profiles.hours_per_week IS
+    'Availability: more_than_30 | less_than_30 | as_needed | none.';
+COMMENT ON COLUMN talent_profiles.open_to_contract_to_hire IS
+    'Whether the talent is open to contract-to-hire roles; NULL when unset.';
+
+-- ===========================================================================
+-- 5. Testimonial status values (preserves rows)
+-- ===========================================================================
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'talent_testimonials'
+    ) THEN
+        UPDATE talent_testimonials
+        SET status = 'confirmed'
+        WHERE status IN ('submitted', 'verified');
+
+        ALTER TABLE talent_testimonials
+            DROP CONSTRAINT IF EXISTS talent_testimonials_status_valid;
+
+        ALTER TABLE talent_testimonials
+            ADD CONSTRAINT talent_testimonials_status_valid
+            CHECK (status IN ('pending', 'confirmed', 'declined'));
+
+        COMMENT ON COLUMN talent_testimonials.status IS
+            'pending: awaiting client response; confirmed: client approved; declined: client declined.';
+    END IF;
+END $$;
+
+-- ===========================================================================
+-- 6. Portfolio tables — drop & recreate (portfolio data is wiped)
+-- ===========================================================================
+DROP TABLE IF EXISTS talent_portfolio_assets CASCADE;
+DROP TABLE IF EXISTS talent_portfolio_deliverables CASCADE; -- legacy, removed
+DROP TABLE IF EXISTS talent_portfolio_skills CASCADE;
+DROP TABLE IF EXISTS talent_portfolios CASCADE;
+
+CREATE TABLE talent_portfolios (
+    id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
+    talent_profile_id   BIGINT NOT NULL REFERENCES talent_profiles (id) ON DELETE CASCADE,
+
+    title               VARCHAR(255) NOT NULL,
+    role                VARCHAR(255),
+    description         TEXT NOT NULL,
+    status              VARCHAR(10) NOT NULL DEFAULT 'published',
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT talent_portfolios_uid_unique UNIQUE (uid),
+    CONSTRAINT talent_portfolios_title_not_empty
+        CHECK (char_length(trim(title)) > 0),
+    CONSTRAINT talent_portfolios_description_not_empty
+        CHECK (char_length(trim(description)) > 0),
+    CONSTRAINT talent_portfolios_status_valid
+        CHECK (status IN ('published', 'draft'))
+);
+
+CREATE INDEX idx_talent_portfolios_uid ON talent_portfolios (uid);
+CREATE INDEX idx_talent_portfolios_profile ON talent_portfolios (talent_profile_id);
+CREATE INDEX idx_talent_portfolios_status ON talent_portfolios (talent_profile_id, status);
+
+DROP TRIGGER IF EXISTS trg_talent_portfolios_updated_at ON talent_portfolios;
+CREATE TRIGGER trg_talent_portfolios_updated_at
+    BEFORE UPDATE ON talent_portfolios
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON TABLE talent_portfolios IS 'Portfolio projects per talent profile.';
+
+CREATE TABLE talent_portfolio_skills (
+    id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
+    portfolio_id        BIGINT NOT NULL REFERENCES talent_portfolios (id) ON DELETE CASCADE,
+    skill_id            BIGINT REFERENCES skills (id) ON DELETE SET NULL,
+    name                VARCHAR(255) NOT NULL,
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT talent_portfolio_skills_uid_unique UNIQUE (uid),
+    CONSTRAINT talent_portfolio_skills_unique UNIQUE (portfolio_id, name),
+    CONSTRAINT talent_portfolio_skills_name_not_empty
+        CHECK (char_length(trim(name)) > 0)
+);
+
+CREATE INDEX idx_talent_portfolio_skills_uid ON talent_portfolio_skills (uid);
+CREATE INDEX idx_talent_portfolio_skills_portfolio
+    ON talent_portfolio_skills (portfolio_id);
+
+COMMENT ON TABLE talent_portfolio_skills IS
+    'Skills and deliverables tagged on a portfolio project.';
+
+CREATE TABLE talent_portfolio_assets (
+    id                  BIGSERIAL PRIMARY KEY,
+    uid                 TEXT NOT NULL DEFAULT generate_public_uid(),
+    portfolio_id        BIGINT NOT NULL REFERENCES talent_portfolios (id) ON DELETE CASCADE,
+
+    asset_type          VARCHAR(10) NOT NULL,
+    file_url            TEXT,
+    file_name           VARCHAR(255),
+    mime_type           VARCHAR(127),
+    text_format         VARCHAR(10),
+    text_heading        VARCHAR(255),
+    text_content        TEXT,
+    link_url            TEXT,
+    link_title          VARCHAR(255),
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT talent_portfolio_assets_uid_unique UNIQUE (uid),
+    CONSTRAINT talent_portfolio_assets_type_valid
+        CHECK (asset_type IN ('image', 'pdf', 'video', 'text', 'link', 'audio')),
+    CONSTRAINT talent_portfolio_assets_text_format_valid
+        CHECK (text_format IS NULL OR text_format IN ('markdown', 'plain')),
+    CONSTRAINT talent_portfolio_assets_payload_valid
+        CHECK (
+            (asset_type IN ('image', 'pdf', 'video', 'audio')
+             AND file_url IS NOT NULL)
+            OR (asset_type = 'link' AND link_url IS NOT NULL)
+            OR (
+                asset_type = 'text'
+                AND text_format = 'markdown'
+                AND text_content IS NOT NULL
+                AND char_length(trim(text_content)) > 0
+            )
+            OR (
+                asset_type = 'text'
+                AND text_format = 'plain'
+                AND text_heading IS NOT NULL
+                AND char_length(trim(text_heading)) > 0
+                AND text_content IS NOT NULL
+                AND char_length(trim(text_content)) > 0
+            )
+        )
+);
+
+CREATE INDEX idx_talent_portfolio_assets_uid ON talent_portfolio_assets (uid);
+CREATE INDEX idx_talent_portfolio_assets_portfolio
+    ON talent_portfolio_assets (portfolio_id);
+
+DROP TRIGGER IF EXISTS trg_talent_portfolio_assets_updated_at ON talent_portfolio_assets;
+CREATE TRIGGER trg_talent_portfolio_assets_updated_at
+    BEFORE UPDATE ON talent_portfolio_assets
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON TABLE talent_portfolio_assets IS
+    'Media/text/link assets attached to a portfolio project.';
+COMMENT ON COLUMN talent_portfolio_assets.text_format IS
+    'markdown: text_content is markdown; plain: text_heading + text_content (description).';
+
+COMMIT;
