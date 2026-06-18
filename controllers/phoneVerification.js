@@ -17,7 +17,10 @@ const mapTwilioError = (error, action = "send") => {
     return { status: 400, message: "Invalid phone number" };
   }
   if (code === 60202 || code === 60203) {
-    return { status: 429, message: "Too many verification attempts. Try again later." };
+    return {
+      status: 429,
+      message: "Too many verification attempts. Try again later.",
+    };
   }
   if (code === 20404) {
     return { status: 400, message: "Verification code expired or not found" };
@@ -44,7 +47,9 @@ const sendCode = async (req, res) => {
       return res.status(400).json({ message: "Phone number is required" });
     }
     if (!isValidPhone(phone)) {
-      return res.status(400).json({ message: "Phone number must be in E.164 format" });
+      return res
+        .status(400)
+        .json({ message: "Phone number must be in E.164 format" });
     }
 
     const { client, serviceSid } = getTwilioClient();
@@ -67,7 +72,9 @@ const sendCode = async (req, res) => {
   } catch (error) {
     if (error.message?.includes("not configured")) {
       console.error("sendCode config error:", error.message);
-      return res.status(500).json({ message: "SMS verification is not configured" });
+      return res
+        .status(500)
+        .json({ message: "SMS verification is not configured" });
     }
 
     const mapped = mapTwilioError(error, "send");
@@ -88,7 +95,9 @@ const verifyCode = async (req, res) => {
       return res.status(400).json({ message: "Phone number is required" });
     }
     if (!isValidPhone(phone)) {
-      return res.status(400).json({ message: "Phone number must be in E.164 format" });
+      return res
+        .status(400)
+        .json({ message: "Phone number must be in E.164 format" });
     }
     if (!code) {
       return res.status(400).json({ message: "Verification code is required" });
@@ -120,7 +129,9 @@ const verifyCode = async (req, res) => {
   } catch (error) {
     if (error.message?.includes("not configured")) {
       console.error("verifyCode config error:", error.message);
-      return res.status(500).json({ message: "SMS verification is not configured" });
+      return res
+        .status(500)
+        .json({ message: "SMS verification is not configured" });
     }
 
     const mapped = mapTwilioError(error, "verify");
