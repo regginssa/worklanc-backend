@@ -3,9 +3,11 @@ const twilio = require("twilio");
 let cachedClient = null;
 
 const getTwilioConfig = () => {
-  const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+  const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID?.trim();
   if (!serviceSid) {
-    throw new Error("TWILIO_VERIFY_SERVICE_SID is not configured");
+    throw new Error(
+      "TWILIO_VERIFY_SERVICE_SID is not configured. Create a Verify Service at https://console.twilio.com/us1/develop/verify/services and set the Service SID (starts with VA...).",
+    );
   }
 
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
