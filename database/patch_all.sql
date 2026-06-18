@@ -356,4 +356,26 @@ COMMENT ON TABLE talent_portfolio_assets IS
 COMMENT ON COLUMN talent_portfolio_assets.text_format IS
     'markdown: text_content is markdown; plain: text_heading + text_content (description).';
 
+-- ---------------------------------------------------------------------------
+-- 7. user_notification_settings (per login identity)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_notification_settings (
+    user_id     BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    settings    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notification_settings_user_id
+    ON user_notification_settings (user_id);
+
+DROP TRIGGER IF EXISTS trg_user_notification_settings_updated_at
+    ON user_notification_settings;
+CREATE TRIGGER trg_user_notification_settings_updated_at
+    BEFORE UPDATE ON user_notification_settings
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON TABLE user_notification_settings IS
+    'Notification preferences for a login identity (not per account).';
+
 COMMIT;
