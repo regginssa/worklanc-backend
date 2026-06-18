@@ -23,12 +23,23 @@ const TALENT_ONBOARDING_STEPS = [
   "/nx/create-profile/submit",
 ];
 
-// Where a freshly created account should begin onboarding.
-// Client onboarding has no flow yet, so client accounts go straight through.
-const firstOnboardingStep = (type) =>
-  type === "talent" ? TALENT_ONBOARDING_STEPS[0] : null;
+const CLIENT_BUSINESS_PLUS_TRIAL_PATH =
+  "/nx/plans/client/business-plus/1mo-trial-net-new-1";
 
-const accountStartsCompleted = (type) => type !== "talent";
+const CLIENT_ONBOARDING_STEPS = [
+  "/nx/client-onboarding/company-size",
+  CLIENT_BUSINESS_PLUS_TRIAL_PATH,
+  "/nx/client-onboarding/verify-phone",
+];
+
+// Where a freshly created account should begin onboarding.
+const firstOnboardingStep = (type) => {
+  if (type === "talent") return TALENT_ONBOARDING_STEPS[0];
+  if (type === "client") return CLIENT_ONBOARDING_STEPS[0];
+  return null;
+};
+
+const accountStartsCompleted = () => false;
 
 // Resolve where to redirect a user for a given account.
 const resolveRedirect = (account) => {
@@ -36,6 +47,9 @@ const resolveRedirect = (account) => {
   if (account.onboarding_completed) return DASHBOARD_PATH;
   if (account.type === "talent") {
     return account.onboarding_step || TALENT_ONBOARDING_STEPS[0];
+  }
+  if (account.type === "client") {
+    return account.onboarding_step || CLIENT_ONBOARDING_STEPS[0];
   }
   return DASHBOARD_PATH;
 };
@@ -48,7 +62,12 @@ const pickActiveAccount = (accounts = [], preferredType) => {
     const match = accounts.find((a) => a.type === preferredType);
     if (match) return match;
   }
-  return accounts.find((a) => !a.onboarding_completed) || accounts[0] || null;
+
+  const incomplete = accounts.filter((a) => !a.onboarding_completed);
+  if (incomplete.length === 1) return incomplete[0];
+  if (incomplete.length > 1) return incomplete[incomplete.length - 1];
+
+  return accounts[0] || null;
 };
 
 const toPublicAccount = (account) => ({
@@ -56,6 +75,9 @@ const toPublicAccount = (account) => ({
   uid: account.uid,
   type: account.type,
   membershipTier: account.membership_tier ?? "basic",
+  companyName: account.company_name ?? "",
+  companyWebsite: account.company_website ?? "",
+  companySize: account.company_size ?? null,
   onboardingCompleted: account.onboarding_completed,
   onboardingStep: account.onboarding_step,
   createdAt: account.created_at,
@@ -138,6 +160,8 @@ module.exports = {
   toPublicMilitaryService,
   DASHBOARD_PATH,
   TALENT_ONBOARDING_STEPS,
+  CLIENT_ONBOARDING_STEPS,
+  CLIENT_BUSINESS_PLUS_TRIAL_PATH,
   firstOnboardingStep,
   accountStartsCompleted,
   resolveRedirect,

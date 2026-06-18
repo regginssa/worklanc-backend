@@ -73,6 +73,9 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS membership_tier VARCHAR(10);
 UPDATE accounts SET membership_tier = 'basic' WHERE membership_tier IS NULL;
 ALTER TABLE accounts ALTER COLUMN membership_tier SET DEFAULT 'basic';
 ALTER TABLE accounts ALTER COLUMN membership_tier SET NOT NULL;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS company_website TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS company_size VARCHAR(20);
 
 DO $$
 BEGIN
@@ -88,6 +91,16 @@ BEGIN
         ALTER TABLE accounts ADD CONSTRAINT accounts_membership_tier_valid
             CHECK (membership_tier IN ('basic', 'plus'));
     END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'accounts_company_size_valid'
+    ) THEN
+        ALTER TABLE accounts ADD CONSTRAINT accounts_company_size_valid
+            CHECK (
+                company_size IS NULL OR
+                company_size IN ('just_me', '2_9', '10_99', '100_499', '500_4999', '5000_plus')
+            );
+    END IF;
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_accounts_uid ON accounts (uid);
@@ -96,6 +109,13 @@ DROP TRIGGER IF EXISTS trg_accounts_updated_at ON accounts;
 CREATE TRIGGER trg_accounts_updated_at
     BEFORE UPDATE ON accounts
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON COLUMN accounts.company_name IS
+    'Client company name collected during client onboarding.';
+COMMENT ON COLUMN accounts.company_website IS
+    'Client company website URL collected during client onboarding.';
+COMMENT ON COLUMN accounts.company_size IS
+    'Client organization size: just_me | 2_9 | 10_99 | 100_499 | 500_4999 | 5000_plus.';
 
 DO $$
 BEGIN

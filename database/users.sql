@@ -154,6 +154,11 @@ CREATE TABLE accounts (
     -- UI labels differ by account type (e.g. "Freelancer Plus" vs "Business Plus").
     membership_tier       VARCHAR(10) NOT NULL DEFAULT 'basic',
 
+    -- Client onboarding business details.
+    company_name          VARCHAR(255),
+    company_website       TEXT,
+    company_size          VARCHAR(20),
+
     onboarding_completed  BOOLEAN NOT NULL DEFAULT FALSE,
     -- Next onboarding route to resume at. NULL once onboarding is completed.
     onboarding_step       VARCHAR(80),
@@ -165,6 +170,11 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_type_valid CHECK (type IN ('talent', 'client')),
     CONSTRAINT accounts_membership_tier_valid
         CHECK (membership_tier IN ('basic', 'plus')),
+    CONSTRAINT accounts_company_size_valid
+        CHECK (
+            company_size IS NULL OR
+            company_size IN ('just_me', '2_9', '10_99', '100_499', '500_4999', '5000_plus')
+        ),
     CONSTRAINT accounts_user_type_unique UNIQUE (user_id, type)
 );
 
@@ -178,6 +188,9 @@ CREATE TRIGGER trg_accounts_updated_at
 COMMENT ON TABLE accounts IS 'Talent/Client accounts owned by a single user identity.';
 COMMENT ON COLUMN accounts.uid IS 'Public opaque ID; use in URLs instead of id.';
 COMMENT ON COLUMN accounts.membership_tier IS 'Subscription tier: basic | plus (shared by talent and client).';
+COMMENT ON COLUMN accounts.company_name IS 'Client company name collected during client onboarding.';
+COMMENT ON COLUMN accounts.company_website IS 'Client company website URL collected during client onboarding.';
+COMMENT ON COLUMN accounts.company_size IS 'Client organization size: just_me | 2_9 | 10_99 | 100_499 | 500_4999 | 5000_plus.';
 COMMENT ON COLUMN accounts.onboarding_step IS 'Next route to resume onboarding; NULL when completed.';
 
 COMMIT;

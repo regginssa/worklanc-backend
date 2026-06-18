@@ -37,6 +37,41 @@ const getById = async (id) => {
   return result.rows[0];
 };
 
+const updateClientProfile = async (
+  id,
+  { companyName, companyWebsite, companySize, membershipTier },
+) => {
+  const sets = [];
+  const values = [];
+  let i = 1;
+
+  if (companyName !== undefined) {
+    sets.push(`company_name = $${i++}`);
+    values.push(companyName);
+  }
+  if (companyWebsite !== undefined) {
+    sets.push(`company_website = $${i++}`);
+    values.push(companyWebsite);
+  }
+  if (companySize !== undefined) {
+    sets.push(`company_size = $${i++}`);
+    values.push(companySize);
+  }
+  if (membershipTier !== undefined) {
+    sets.push(`membership_tier = $${i++}`);
+    values.push(membershipTier);
+  }
+
+  if (sets.length === 0) return getById(id);
+
+  values.push(id);
+  const result = await pool.query(
+    `UPDATE accounts SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+    values,
+  );
+  return result.rows[0];
+};
+
 // Update onboarding progress. Pass step to move the resume point, and/or
 // completed=true to finish (which clears the step).
 const updateOnboarding = async (id, { step, completed }) => {
@@ -76,6 +111,7 @@ module.exports = {
   getByUserId,
   getByUserAndType,
   getById,
+  updateClientProfile,
   updateOnboarding,
   deleteOne,
 };
