@@ -348,7 +348,20 @@ const applyMilitaryVeteranUpdate = async (userId, militaryVeteran) => {
 const updateMe = async (req, res) => {
   try {
     const body = req.body || {};
-    const { militaryVeteran, ...identityPatch } = body;
+    const { militaryVeteran, phoneVerified, ...identityPatch } = body;
+
+    if (phoneVerified !== undefined) {
+      return res.status(400).json({
+        message: "Phone verification must be completed through /phone-verification/verify",
+      });
+    }
+
+    if (
+      identityPatch.phone !== undefined &&
+      identityPatch.phone !== req.user.phone
+    ) {
+      identityPatch.phoneVerified = false;
+    }
 
     if (militaryVeteran !== undefined) {
       await applyMilitaryVeteranUpdate(req.user.id, militaryVeteran);

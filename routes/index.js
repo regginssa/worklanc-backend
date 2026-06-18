@@ -8,5 +8,6 @@ router.use("/categories", require("./categories"));
 router.use("/profile", require("./profile"));
 router.use("/upload", require("./upload"));
 router.use("/geocoding", require("./geocoding"));
+router.use("/phone-verification", require("./phoneVerification"));
 
 module.exports = router;
