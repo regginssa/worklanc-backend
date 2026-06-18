@@ -378,4 +378,53 @@ CREATE TRIGGER trg_user_notification_settings_updated_at
 COMMENT ON TABLE user_notification_settings IS
     'Notification preferences for a login identity (not per account).';
 
+-- ---------------------------------------------------------------------------
+-- 8. jobs (client job posts) — see jobs.sql for full standalone script
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS jobs (
+    id                      BIGSERIAL PRIMARY KEY,
+    uid                     TEXT NOT NULL DEFAULT generate_public_uid(),
+    account_id              BIGINT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    status                  VARCHAR(20) NOT NULL DEFAULT 'draft',
+    current_step            VARCHAR(80) NOT NULL DEFAULT '/nx/job-post/title',
+    title                   VARCHAR(255),
+    category_slug           VARCHAR(80) NOT NULL DEFAULT 'full-stack-development',
+    skills                  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    project_size            VARCHAR(20),
+    duration                VARCHAR(10),
+    experience_level        VARCHAR(20),
+    contract_to_hire        VARCHAR(5),
+    location_type           VARCHAR(10) NOT NULL DEFAULT 'local',
+    location_preferences    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    budget_type             VARCHAR(10) NOT NULL DEFAULT 'hourly',
+    budget_currency         VARCHAR(3) NOT NULL DEFAULT 'USD',
+    budget_min              NUMERIC(12, 2),
+    budget_max              NUMERIC(12, 2),
+    budget_fixed            NUMERIC(12, 2),
+    description             TEXT,
+    attachments             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    uma_recruiter_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
+    screening_questions     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    english_level           VARCHAR(40),
+    hours_per_week          VARCHAR(30),
+    talent_type             VARCHAR(20),
+    hire_date               VARCHAR(20),
+    professionals_needed    VARCHAR(20),
+    published_at            TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT jobs_uid_unique UNIQUE (uid),
+    CONSTRAINT jobs_status_valid
+        CHECK (status IN ('draft', 'pending', 'open', 'completed', 'cancelled'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_uid ON jobs (uid);
+CREATE INDEX IF NOT EXISTS idx_jobs_account_id ON jobs (account_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (account_id, status);
+
+DROP TRIGGER IF EXISTS trg_jobs_updated_at ON jobs;
+CREATE TRIGGER trg_jobs_updated_at
+    BEFORE UPDATE ON jobs
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 COMMIT;
