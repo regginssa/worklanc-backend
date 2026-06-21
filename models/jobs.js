@@ -80,7 +80,7 @@ const BROWSE_CLIENT_STATS_SQL = `
   GROUP BY a.id, u.id
 `;
 
-const listOpenForBrowse = async () => {
+const listOpenForBrowse = async (userId = null) => {
   const result = await pool.query(
     `SELECT
       j.*,
@@ -94,18 +94,22 @@ const listOpenForBrowse = async () => {
       stats.user_created_at,
       stats.jobs_posted,
       stats.open_jobs,
-      stats.completed_jobs
+      stats.completed_jobs,
+      (jr.id IS NOT NULL) AS is_read
     FROM jobs j
     JOIN LATERAL (${BROWSE_CLIENT_STATS_SQL}) stats ON true
+    LEFT JOIN job_reads jr
+      ON jr.job_id = j.id AND jr.user_id = $1
     WHERE j.status = 'open'
       AND j.title IS NOT NULL
       AND char_length(trim(j.title)) > 0
     ORDER BY j.published_at DESC NULLS LAST, j.created_at DESC`,
+    [userId],
   );
   return result.rows;
 };
 
-const getOpenForBrowseByUid = async (uid) => {
+const getOpenForBrowseByUid = async (uid, userId = null) => {
   const result = await pool.query(
     `SELECT
       j.*,
@@ -119,11 +123,14 @@ const getOpenForBrowseByUid = async (uid) => {
       stats.user_created_at,
       stats.jobs_posted,
       stats.open_jobs,
-      stats.completed_jobs
+      stats.completed_jobs,
+      (jr.id IS NOT NULL) AS is_read
     FROM jobs j
     JOIN LATERAL (${BROWSE_CLIENT_STATS_SQL}) stats ON true
+    LEFT JOIN job_reads jr
+      ON jr.job_id = j.id AND jr.user_id = $2
     WHERE j.uid = $1 AND j.status = 'open'`,
-    [uid],
+    [uid, userId],
   );
   return result.rows[0];
 };

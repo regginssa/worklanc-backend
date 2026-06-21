@@ -1,5 +1,6 @@
 const Accounts = require("../models/accounts");
 const Jobs = require("../models/jobs");
+const JobReads = require("../models/jobReads");
 const Users = require("../models/users");
 const {
   JOB_POST_STEPS,
@@ -94,7 +95,8 @@ const assertJobOwnership = async (req, uid) => {
 // GET /jobs/browse — open jobs for freelancer find-work feed
 const browseList = async (req, res) => {
   try {
-    const rows = await Jobs.listOpenForBrowse();
+    const userId = req.user?.id ?? null;
+    const rows = await Jobs.listOpenForBrowse(userId);
     const { toBrowseListItem } = require("../utils/jobBrowse");
     return res.status(200).json({
       jobs: rows.map(toBrowseListItem),
@@ -108,7 +110,8 @@ const browseList = async (req, res) => {
 // GET /jobs/browse/:uid — public job detail for freelancers
 const browseOne = async (req, res) => {
   try {
-    const row = await Jobs.getOpenForBrowseByUid(req.params.uid);
+    const userId = req.user?.id ?? null;
+    const row = await Jobs.getOpenForBrowseByUid(req.params.uid, userId);
     if (!row) {
       return res.status(404).json({ message: "Job not found" });
     }
@@ -117,6 +120,23 @@ const browseOne = async (req, res) => {
     return res.status(200).json({ job: toBrowseDetail(row) });
   } catch (e) {
     console.error("jobs.browseOne error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// POST /jobs/browse/:uid/read — mark a browse job as read for the current user
+const markBrowseRead = async (req, res) => {
+  try {
+    const job = await Jobs.getOpenForBrowseByUid(req.params.uid);
+    if (!job) {
+      return res.status(404).json({ message: "Job not found" });
+    }
+
+    await JobReads.markRead(req.user.id, job.id);
+
+    return res.status(200).json({ success: true, isRead: true });
+  } catch (e) {
+    console.error("jobs.markBrowseRead error: ", e);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -343,6 +363,7 @@ const activate = async (req, res) => {
 module.exports = {
   browseList,
   browseOne,
+  markBrowseRead,
   create,
   list,
   getOne,

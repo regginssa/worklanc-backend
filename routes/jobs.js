@@ -5,6 +5,7 @@ const optionalAuth = require("../middleware/optionalAuth");
 
 router.get("/browse", optionalAuth, controllers.browseList);
 router.get("/browse/:uid", optionalAuth, controllers.browseOne);
+router.post("/browse/:uid/read", requireAuth, controllers.markBrowseRead);
 
 router.post("/", requireAuth, controllers.create);
 router.get("/", requireAuth, controllers.list);

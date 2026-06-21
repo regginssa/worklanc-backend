@@ -96,6 +96,7 @@ const toBrowseJobBase = (row) => ({
   invitesSent: 0,
   unansweredInvites: 0,
   requiredConnects: 20,
+  isRead: Boolean(row.is_read),
 });
 
 const toBrowseListItem = (row) => ({
