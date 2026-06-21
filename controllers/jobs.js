@@ -91,6 +91,36 @@ const assertJobOwnership = async (req, uid) => {
   return { account, job };
 };
 
+// GET /jobs/browse — open jobs for freelancer find-work feed
+const browseList = async (req, res) => {
+  try {
+    const rows = await Jobs.listOpenForBrowse();
+    const { toBrowseListItem } = require("../utils/jobBrowse");
+    return res.status(200).json({
+      jobs: rows.map(toBrowseListItem),
+    });
+  } catch (e) {
+    console.error("jobs.browseList error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// GET /jobs/browse/:uid — public job detail for freelancers
+const browseOne = async (req, res) => {
+  try {
+    const row = await Jobs.getOpenForBrowseByUid(req.params.uid);
+    if (!row) {
+      return res.status(404).json({ message: "Job not found" });
+    }
+
+    const { toBrowseDetail } = require("../utils/jobBrowse");
+    return res.status(200).json({ job: toBrowseDetail(row) });
+  } catch (e) {
+    console.error("jobs.browseOne error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 // POST /jobs — create a new draft job post
 const create = async (req, res) => {
   try {
@@ -311,6 +341,8 @@ const activate = async (req, res) => {
 };
 
 module.exports = {
+  browseList,
+  browseOne,
   create,
   list,
   getOne,

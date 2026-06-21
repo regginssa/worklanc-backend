@@ -1,6 +1,10 @@
 const router = require("express").Router();
 const controllers = require("../controllers/jobs");
 const requireAuth = require("../middleware/requireAuth");
+const optionalAuth = require("../middleware/optionalAuth");
+
+router.get("/browse", optionalAuth, controllers.browseList);
+router.get("/browse/:uid", optionalAuth, controllers.browseOne);
 
 router.post("/", requireAuth, controllers.create);
 router.get("/", requireAuth, controllers.list);
