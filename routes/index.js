@@ -10,5 +10,6 @@ router.use("/upload", require("./upload"));
 router.use("/geocoding", require("./geocoding"));
 router.use("/phone-verification", require("./phoneVerification"));
 router.use("/jobs", require("./jobs"));
+router.use("/payments", require("./payments"));
 
 module.exports = router;

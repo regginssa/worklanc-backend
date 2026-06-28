@@ -118,6 +118,7 @@ const update = async (id, data = {}) => {
     marketingOptIn: "marketing_opt_in",
     isMilitaryVeteran: "is_military_veteran",
     militaryVeteranDeclined: "military_veteran_declined",
+    stripeCustomerId: "stripe_customer_id",
   };
 
   const sets = [];
