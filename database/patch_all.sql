@@ -479,4 +479,34 @@ CREATE TRIGGER trg_payment_methods_updated_at
 COMMENT ON TABLE payment_methods IS
     'Saved billing methods per login identity (user). Stripe cards today; PayPal/crypto later.';
 
+-- ---------------------------------------------------------------------------
+-- 10. payment_methods crypto columns + one method per type per user
+-- ---------------------------------------------------------------------------
+ALTER TABLE payment_methods
+    ALTER COLUMN stripe_payment_method_id DROP NOT NULL;
+
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS crypto_address TEXT;
+
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS crypto_chain VARCHAR(20);
+
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS crypto_token VARCHAR(20);
+
+ALTER TABLE payment_methods
+    ADD COLUMN IF NOT EXISTS crypto_label VARCHAR(255);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_user_card_unique
+    ON payment_methods (user_id)
+    WHERE type = 'card';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_user_crypto_unique
+    ON payment_methods (user_id)
+    WHERE type = 'crypto';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_crypto_address_chain
+    ON payment_methods (crypto_address, crypto_chain)
+    WHERE type = 'crypto' AND crypto_address IS NOT NULL;
+
 COMMIT;

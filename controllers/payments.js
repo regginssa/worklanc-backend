@@ -2,6 +2,8 @@ const Users = require("../models/users");
 const PaymentMethods = require("../models/paymentMethods");
 const StripeService = require("../services/stripe");
 
+const VALID_CRYPTO_CHAINS = new Set(["solana", "ethereum", "bnb"]);
+
 const ensureStripeCustomer = async (user) => {
   if (user.stripe_customer_id) {
     return user.stripe_customer_id;
@@ -18,6 +20,14 @@ const ensureStripeCustomer = async (user) => {
 };
 
 const saveStripeCardFromPaymentMethod = async (user, paymentMethodId) => {
+  const existingCount = await PaymentMethods.countCardsByUserId(user.id);
+  if (existingCount > 0) {
+    throw Object.assign(
+      new Error("You can only save one debit or credit card."),
+      { status: 409 },
+    );
+  }
+
   const customerId = await ensureStripeCustomer(user);
   const paymentMethod = await StripeService.attachPaymentMethod(
     paymentMethodId,
@@ -30,13 +40,6 @@ const saveStripeCardFromPaymentMethod = async (user, paymentMethodId) => {
     });
   }
 
-  const cardCount = await PaymentMethods.countCardsByUserId(user.id);
-  const isDefault = cardCount === 0;
-
-  if (isDefault) {
-    await PaymentMethods.clearDefaultForUser(user.id);
-  }
-
   return PaymentMethods.createCard({
     userId: user.id,
     stripePaymentMethodId: paymentMethod.id,
@@ -45,14 +48,17 @@ const saveStripeCardFromPaymentMethod = async (user, paymentMethodId) => {
     cardExpMonth: paymentMethod.card.exp_month,
     cardExpYear: paymentMethod.card.exp_year,
     billingName: paymentMethod.billing_details?.name ?? null,
-    isDefault,
+    isDefault: true,
   });
 };
 
 const listMyPaymentMethods = async (req, res) => {
   try {
-    const cards = await PaymentMethods.listCardsByUserId(req.user.id);
-    return res.status(200).json({ cards });
+    const [cards, cryptoWallets] = await Promise.all([
+      PaymentMethods.listCardsByUserId(req.user.id),
+      PaymentMethods.listCryptoByUserId(req.user.id),
+    ]);
+    return res.status(200).json({ cards, cryptoWallets });
   } catch (e) {
     console.error("listMyPaymentMethods error: ", e);
     return res.status(500).json({ message: "Internal server error" });
@@ -74,8 +80,8 @@ const saveStripePaymentMethod = async (req, res) => {
     const card = await saveStripeCardFromPaymentMethod(user, paymentMethodId);
     return res.status(201).json({ card });
   } catch (e) {
-    if (e.status === 400) {
-      return res.status(400).json({ message: e.message });
+    if (e.status === 400 || e.status === 409) {
+      return res.status(e.status).json({ message: e.message });
     }
     if (e.type === "StripeInvalidRequestError") {
       return res.status(400).json({
@@ -87,56 +93,130 @@ const saveStripePaymentMethod = async (req, res) => {
   }
 };
 
-const updateStripePaymentMethod = async (req, res) => {
+const saveCryptoWallet = async (req, res) => {
   try {
-    const { uid } = req.params;
-    const paymentMethodId = req.body?.paymentMethodId;
-    if (!paymentMethodId || typeof paymentMethodId !== "string") {
-      return res.status(400).json({ message: "paymentMethodId is required" });
+    const { address, chain, token, label } = req.body ?? {};
+
+    if (!address || typeof address !== "string") {
+      return res.status(400).json({ message: "address is required" });
+    }
+    if (!chain || !VALID_CRYPTO_CHAINS.has(chain)) {
+      return res.status(400).json({ message: "Unsupported chain." });
+    }
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ message: "token is required" });
     }
 
+    const existingCount = await PaymentMethods.countCryptoByUserId(req.user.id);
+    if (existingCount > 0) {
+      return res.status(409).json({
+        message: "You can only save one crypto wallet.",
+      });
+    }
+
+    const wallet = await PaymentMethods.createCrypto({
+      userId: req.user.id,
+      address: address.trim(),
+      chain,
+      token,
+      label: label?.trim() || null,
+      isDefault: true,
+    });
+
+    return res.status(201).json({ wallet });
+  } catch (e) {
+    if (e.code === "23505") {
+      return res.status(409).json({
+        message: "This wallet is already linked to another account.",
+      });
+    }
+    console.error("saveCryptoWallet error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const updatePaymentMethod = async (req, res) => {
+  try {
+    const { uid } = req.params;
     const existing = await PaymentMethods.getByUidAndUserId(uid, req.user.id);
     if (!existing) {
       return res.status(404).json({ message: "Payment method not found" });
     }
 
-    const user = await Users.getById(req.user.id);
-    const customerId = await ensureStripeCustomer(user);
+    if (existing.type === "card") {
+      const paymentMethodId = req.body?.paymentMethodId;
+      if (!paymentMethodId || typeof paymentMethodId !== "string") {
+        return res.status(400).json({ message: "paymentMethodId is required" });
+      }
 
-    const paymentMethod = await StripeService.attachPaymentMethod(
-      paymentMethodId,
-      customerId,
-    );
+      const user = await Users.getById(req.user.id);
+      const customerId = await ensureStripeCustomer(user);
 
-    if (paymentMethod.type !== "card" || !paymentMethod.card) {
-      return res
-        .status(400)
-        .json({ message: "Only card payment methods are supported" });
+      const paymentMethod = await StripeService.attachPaymentMethod(
+        paymentMethodId,
+        customerId,
+      );
+
+      if (paymentMethod.type !== "card" || !paymentMethod.card) {
+        return res
+          .status(400)
+          .json({ message: "Only card payment methods are supported" });
+      }
+
+      const oldStripeId = existing.stripe_payment_method_id;
+
+      const card = await PaymentMethods.updateCard(uid, req.user.id, {
+        stripePaymentMethodId: paymentMethod.id,
+        cardBrand: paymentMethod.card.brand,
+        cardLast4: paymentMethod.card.last4,
+        cardExpMonth: paymentMethod.card.exp_month,
+        cardExpYear: paymentMethod.card.exp_year,
+        billingName: paymentMethod.billing_details?.name ?? null,
+      });
+
+      if (oldStripeId && oldStripeId !== paymentMethod.id) {
+        await StripeService.detachPaymentMethod(oldStripeId);
+      }
+
+      return res.status(200).json({ card });
     }
 
-    const oldStripeId = existing.stripe_payment_method_id;
+    if (existing.type === "crypto") {
+      const { address, chain, token, label } = req.body ?? {};
 
-    const card = await PaymentMethods.updateCard(uid, req.user.id, {
-      stripePaymentMethodId: paymentMethod.id,
-      cardBrand: paymentMethod.card.brand,
-      cardLast4: paymentMethod.card.last4,
-      cardExpMonth: paymentMethod.card.exp_month,
-      cardExpYear: paymentMethod.card.exp_year,
-      billingName: paymentMethod.billing_details?.name ?? null,
-    });
+      if (!address || typeof address !== "string") {
+        return res.status(400).json({ message: "address is required" });
+      }
+      if (!chain || !VALID_CRYPTO_CHAINS.has(chain)) {
+        return res.status(400).json({ message: "Unsupported chain." });
+      }
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ message: "token is required" });
+      }
 
-    if (oldStripeId && oldStripeId !== paymentMethod.id) {
-      await StripeService.detachPaymentMethod(oldStripeId);
+      const wallet = await PaymentMethods.updateCrypto(uid, req.user.id, {
+        address: address.trim(),
+        chain,
+        token,
+        label: label?.trim() || null,
+      });
+
+      return res.status(200).json({ wallet });
     }
 
-    return res.status(200).json({ card });
+    return res.status(400).json({ message: "Unsupported payment method type." });
   } catch (e) {
     if (e.type === "StripeInvalidRequestError") {
       return res.status(400).json({
-        message: e.message || "Unable to update card. Please check your details.",
+        message: e.message || "Unable to update payment method.",
       });
     }
-    console.error("updateStripePaymentMethod error: ", e);
+    if (e.code === "23505") {
+      return res.status(409).json({
+        message: "This wallet is already linked to another account.",
+      });
+    }
+    console.error("updatePaymentMethod error: ", e);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -149,18 +229,11 @@ const deletePaymentMethod = async (req, res) => {
       return res.status(404).json({ message: "Payment method not found" });
     }
 
-    await StripeService.detachPaymentMethod(existing.stripe_payment_method_id);
-    await PaymentMethods.deleteByUidAndUserId(uid, req.user.id);
-
-    if (existing.is_default) {
-      const remaining = await PaymentMethods.listCardsByUserId(req.user.id);
-      if (remaining.length > 0) {
-        await PaymentMethods.updateCard(remaining[0].uid, req.user.id, {
-          isDefault: true,
-        });
-      }
+    if (existing.type === "card" && existing.stripe_payment_method_id) {
+      await StripeService.detachPaymentMethod(existing.stripe_payment_method_id);
     }
 
+    await PaymentMethods.deleteByUidAndUserId(uid, req.user.id);
     return res.status(200).json({ success: true });
   } catch (e) {
     console.error("deletePaymentMethod error: ", e);
@@ -171,6 +244,7 @@ const deletePaymentMethod = async (req, res) => {
 module.exports = {
   listMyPaymentMethods,
   saveStripePaymentMethod,
-  updateStripePaymentMethod,
+  saveCryptoWallet,
+  updatePaymentMethod,
   deletePaymentMethod,
 };
