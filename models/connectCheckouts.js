@@ -18,6 +18,19 @@ const toPublicCheckoutRow = (row) => ({
   expiresAt: row.expires_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  cryptoPayment: row.crypto_chain
+    ? {
+        chain: row.crypto_chain,
+        token: row.crypto_token,
+        amount: row.crypto_amount,
+        treasuryAddress: row.crypto_treasury_address,
+        senderAddress: row.crypto_sender_address,
+        tokenContract: row.crypto_token_contract,
+        tokenPriceUsd: row.crypto_token_price_usd,
+        quoteExpiresAt: row.crypto_quote_expires_at,
+        txHash: row.crypto_tx_hash,
+      }
+    : null,
 });
 
 const expireStaleForUser = async (userId, client = pool) => {
@@ -117,6 +130,67 @@ const markProcessing = async (uid, userId, { paymentMethod, savedPaymentMethodUi
   return result.rows[0] ?? null;
 };
 
+const lockCryptoQuote = async (
+  uid,
+  userId,
+  {
+    savedPaymentMethodUid,
+    cryptoChain,
+    cryptoToken,
+    cryptoAmount,
+    cryptoTreasuryAddress,
+    cryptoSenderAddress,
+    cryptoTokenContract,
+    cryptoTokenPriceUsd,
+    quoteExpiresAt,
+  },
+) => {
+  const result = await pool.query(
+    `UPDATE connect_checkouts
+     SET status = 'processing',
+         payment_method = 'crypto',
+         saved_payment_method_uid = $3,
+         crypto_chain = $4,
+         crypto_token = $5,
+         crypto_amount = $6,
+         crypto_treasury_address = $7,
+         crypto_sender_address = $8,
+         crypto_token_contract = $9,
+         crypto_token_price_usd = $10,
+         crypto_quote_expires_at = $11,
+         crypto_tx_hash = NULL,
+         failure_message = NULL,
+         updated_at = NOW()
+     WHERE uid = $1
+       AND user_id = $2
+       AND status IN ('pending', 'failed', 'processing')
+       AND expires_at > NOW()
+     RETURNING *`,
+    [
+      uid,
+      userId,
+      savedPaymentMethodUid,
+      cryptoChain,
+      cryptoToken,
+      cryptoAmount,
+      cryptoTreasuryAddress,
+      cryptoSenderAddress,
+      cryptoTokenContract,
+      cryptoTokenPriceUsd,
+      quoteExpiresAt,
+    ],
+  );
+  return result.rows[0] ?? null;
+};
+
+const getByCryptoTxHash = async (txHash) => {
+  const result = await pool.query(
+    `SELECT * FROM connect_checkouts WHERE crypto_tx_hash = $1`,
+    [txHash],
+  );
+  return result.rows[0] ?? null;
+};
+
 const markCompleted = async (uid, userId, stripePaymentIntentId) => {
   const result = await pool.query(
     `UPDATE connect_checkouts
@@ -137,9 +211,12 @@ const markCompleted = async (uid, userId, stripePaymentIntentId) => {
 const completeAndCreditConnects = async (
   uid,
   userId,
-  stripePaymentIntentId,
+  paymentReference,
   connectAmount,
 ) => {
+  const stripePaymentIntentId = paymentReference?.stripePaymentIntentId ?? null;
+  const cryptoTxHash = paymentReference?.cryptoTxHash ?? null;
+
   const client = await pool.connect();
 
   try {
@@ -148,7 +225,8 @@ const completeAndCreditConnects = async (
     const checkoutResult = await client.query(
       `UPDATE connect_checkouts
        SET status = 'completed',
-           stripe_payment_intent_id = $3,
+           stripe_payment_intent_id = COALESCE($3, stripe_payment_intent_id),
+           crypto_tx_hash = COALESCE($4, crypto_tx_hash),
            completed_at = NOW(),
            connects_expire_at = NOW() + INTERVAL '1 year',
            connects_credited = TRUE,
@@ -158,7 +236,7 @@ const completeAndCreditConnects = async (
          AND status = 'processing'
          AND connects_credited = FALSE
        RETURNING *`,
-      [uid, userId, stripePaymentIntentId],
+      [uid, userId, stripePaymentIntentId, cryptoTxHash],
     );
 
     let checkoutRow = checkoutResult.rows[0] ?? null;
@@ -300,6 +378,15 @@ const resetToPending = async (uid, userId) => {
      SET status = 'pending',
          payment_method = NULL,
          saved_payment_method_uid = NULL,
+         crypto_chain = NULL,
+         crypto_token = NULL,
+         crypto_amount = NULL,
+         crypto_treasury_address = NULL,
+         crypto_sender_address = NULL,
+         crypto_token_contract = NULL,
+         crypto_token_price_usd = NULL,
+         crypto_quote_expires_at = NULL,
+         crypto_tx_hash = NULL,
          failure_message = NULL,
          updated_at = NOW()
      WHERE uid = $1
@@ -320,6 +407,8 @@ module.exports = {
   getByUidAndUserId,
   getPublicByUidAndUserId,
   markProcessing,
+  lockCryptoQuote,
+  getByCryptoTxHash,
   markCompleted,
   completeAndCreditConnects,
   markFailed,

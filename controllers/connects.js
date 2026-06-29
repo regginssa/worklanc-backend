@@ -3,6 +3,15 @@ const PaymentMethods = require("../models/paymentMethods");
 const ConnectBundleOptions = require("../models/connectBundleOptions");
 const ConnectCheckouts = require("../models/connectCheckouts");
 const StripeService = require("../services/stripe");
+const {
+  assertTokenOnChain,
+  CRYPTO_QUOTE_TTL_MINUTES,
+} = require("../config/crypto");
+const {
+  fetchTokenPricesUsd,
+  convertUsdCentsToCryptoAmount,
+} = require("../services/cryptoPricing");
+const { verifyCryptoPayment } = require("../services/cryptoVerification");
 
 const PROMO_CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -260,6 +269,10 @@ const getCheckout = async (req, res) => {
       return res.status(200).json({ checkout, alreadyPaid: true });
     }
 
+    if (checkout.status === "processing" && checkout.paymentMethod === "crypto") {
+      return res.status(200).json({ checkout });
+    }
+
     if (checkout.status !== "pending" && checkout.status !== "failed") {
       return res.status(409).json({
         message: "This checkout is no longer available for payment.",
@@ -390,7 +403,7 @@ const payCheckoutWithCard = async (req, res) => {
       const completion = await ConnectCheckouts.completeAndCreditConnects(
         uid,
         req.user.id,
-        paymentIntent.id,
+        { stripePaymentIntentId: paymentIntent.id },
         checkoutRow.connect_amount,
       );
 
@@ -423,6 +436,229 @@ const payCheckoutWithCard = async (req, res) => {
   }
 };
 
+const prepareCheckoutCryptoPayment = async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const cryptoWalletUid = req.body?.cryptoWalletUid;
+    const cryptoToken = String(req.body?.cryptoToken ?? "").toLowerCase();
+
+    if (!uid || typeof uid !== "string") {
+      return res.status(400).json({ message: "Checkout uid is required." });
+    }
+
+    if (!cryptoWalletUid || typeof cryptoWalletUid !== "string") {
+      return res.status(400).json({ message: "cryptoWalletUid is required." });
+    }
+
+    if (!cryptoToken) {
+      return res.status(400).json({ message: "cryptoToken is required." });
+    }
+
+    await ConnectCheckouts.expireStaleForUser(req.user.id);
+
+    const checkoutRow = await ConnectCheckouts.getByUidAndUserId(uid, req.user.id);
+    if (!checkoutRow) {
+      return res.status(404).json({ message: "Checkout not found." });
+    }
+
+    if (checkoutRow.status === "completed") {
+      const connectsBalance = await Users.getConnectsBalance(req.user.id);
+      return res.status(200).json({
+        checkout: ConnectCheckouts.toPublicCheckoutRow(checkoutRow),
+        connectsBalance,
+        alreadyPaid: true,
+      });
+    }
+
+    if (
+      checkoutRow.status !== "pending" &&
+      checkoutRow.status !== "failed" &&
+      checkoutRow.status !== "processing"
+    ) {
+      return res.status(409).json({
+        message: "This checkout is not available for payment.",
+      });
+    }
+
+    if (new Date(checkoutRow.expires_at).getTime() <= Date.now()) {
+      await ConnectCheckouts.markFailed(uid, req.user.id, "Checkout expired.");
+      return res.status(410).json({ message: "This checkout has expired." });
+    }
+
+    const savedWallet = await PaymentMethods.getByUidAndUserId(
+      cryptoWalletUid,
+      req.user.id,
+    );
+
+    if (!savedWallet || savedWallet.type !== "crypto") {
+      return res.status(400).json({ message: "Saved crypto wallet not found." });
+    }
+
+    const chain = savedWallet.crypto_chain;
+    const tokenValidation = assertTokenOnChain(chain, cryptoToken);
+    if (tokenValidation.error) {
+      return res.status(400).json({ message: tokenValidation.error });
+    }
+
+    const prices = await fetchTokenPricesUsd();
+    const priceUsd = prices[cryptoToken];
+    const quote = convertUsdCentsToCryptoAmount(
+      checkoutRow.total_cents,
+      cryptoToken,
+      priceUsd,
+    );
+
+    if (quote.error) {
+      return res.status(400).json({ message: quote.error });
+    }
+
+    const quoteExpiresAt = new Date(
+      Date.now() + CRYPTO_QUOTE_TTL_MINUTES * 60 * 1000,
+    );
+
+    const locked = await ConnectCheckouts.lockCryptoQuote(uid, req.user.id, {
+      savedPaymentMethodUid: cryptoWalletUid,
+      cryptoChain: chain,
+      cryptoToken,
+      cryptoAmount: quote.amount,
+      cryptoTreasuryAddress: tokenValidation.treasury,
+      cryptoSenderAddress: savedWallet.crypto_address,
+      cryptoTokenContract: tokenValidation.contract,
+      cryptoTokenPriceUsd: quote.priceUsd,
+      quoteExpiresAt,
+    });
+
+    if (!locked) {
+      return res.status(409).json({
+        message: "Unable to prepare crypto payment for this checkout.",
+      });
+    }
+
+    return res.status(200).json({
+      checkout: ConnectCheckouts.toPublicCheckoutRow(locked),
+      payment: {
+        chain,
+        token: cryptoToken,
+        amount: quote.amount,
+        treasuryAddress: tokenValidation.treasury,
+        senderAddress: savedWallet.crypto_address,
+        tokenContract: tokenValidation.contract,
+        quoteExpiresAt: quoteExpiresAt.toISOString(),
+        checkoutUid: uid,
+      },
+    });
+  } catch (e) {
+    console.error("prepareCheckoutCryptoPayment error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const confirmCheckoutCryptoPayment = async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const txHash = String(req.body?.txHash ?? "").trim();
+
+    if (!uid || typeof uid !== "string") {
+      return res.status(400).json({ message: "Checkout uid is required." });
+    }
+
+    if (!txHash) {
+      return res.status(400).json({ message: "txHash is required." });
+    }
+
+    await ConnectCheckouts.expireStaleForUser(req.user.id);
+
+    const checkoutRow = await ConnectCheckouts.getByUidAndUserId(uid, req.user.id);
+    if (!checkoutRow) {
+      return res.status(404).json({ message: "Checkout not found." });
+    }
+
+    if (checkoutRow.status === "completed") {
+      const connectsBalance = await Users.getConnectsBalance(req.user.id);
+      return res.status(200).json({
+        checkout: ConnectCheckouts.toPublicCheckoutRow(checkoutRow),
+        connectsBalance,
+        alreadyPaid: true,
+      });
+    }
+
+    if (checkoutRow.status !== "processing" || checkoutRow.payment_method !== "crypto") {
+      return res.status(409).json({
+        message: "Crypto payment has not been prepared for this checkout.",
+      });
+    }
+
+    if (
+      checkoutRow.crypto_quote_expires_at &&
+      new Date(checkoutRow.crypto_quote_expires_at).getTime() < Date.now()
+    ) {
+      await ConnectCheckouts.resetToPending(uid, req.user.id);
+      return res.status(410).json({
+        message: "Crypto quote expired. Prepare payment again.",
+      });
+    }
+
+    const existingTx = await ConnectCheckouts.getByCryptoTxHash(txHash);
+    if (existingTx && existingTx.uid !== uid) {
+      return res.status(409).json({
+        message: "This transaction has already been used for another checkout.",
+      });
+    }
+
+    if (existingTx?.status === "completed") {
+      const connectsBalance = await Users.getConnectsBalance(req.user.id);
+      return res.status(200).json({
+        checkout: ConnectCheckouts.toPublicCheckoutRow(existingTx),
+        connectsBalance,
+        alreadyPaid: true,
+      });
+    }
+
+    const verification = await verifyCryptoPayment({
+      chain: checkoutRow.crypto_chain,
+      txHash,
+      treasuryAddress: checkoutRow.crypto_treasury_address,
+      senderAddress: checkoutRow.crypto_sender_address,
+      token: checkoutRow.crypto_token,
+      tokenContract: checkoutRow.crypto_token_contract,
+      expectedAmount: checkoutRow.crypto_amount,
+    });
+
+    if (!verification.ok) {
+      if (verification.pending) {
+        return res.status(200).json({
+          message: verification.error,
+          pending: true,
+        });
+      }
+
+      await ConnectCheckouts.markFailed(uid, req.user.id, verification.error);
+      return res.status(402).json({ message: verification.error });
+    }
+
+    const completion = await ConnectCheckouts.completeAndCreditConnects(
+      uid,
+      req.user.id,
+      { cryptoTxHash: txHash },
+      checkoutRow.connect_amount,
+    );
+
+    if (!completion?.checkout) {
+      return res.status(409).json({
+        message: "Payment recorded inconsistently. Contact support.",
+      });
+    }
+
+    return res.status(200).json({
+      checkout: ConnectCheckouts.toPublicCheckoutRow(completion.checkout),
+      connectsBalance: completion.connectsBalance,
+    });
+  } catch (e) {
+    console.error("confirmCheckoutCryptoPayment error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 module.exports = {
   listBundles,
   getConnectsBalance,
@@ -430,4 +666,6 @@ module.exports = {
   applyCheckoutPromo,
   getCheckout,
   payCheckoutWithCard,
+  prepareCheckoutCryptoPayment,
+  confirmCheckoutCryptoPayment,
 };

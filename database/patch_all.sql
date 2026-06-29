@@ -611,4 +611,19 @@ ALTER TABLE connect_checkouts
 ALTER TABLE connect_checkouts
     ADD COLUMN IF NOT EXISTS connects_credited BOOLEAN NOT NULL DEFAULT FALSE;
 
+ALTER TABLE connect_checkouts
+    ADD COLUMN IF NOT EXISTS crypto_chain VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS crypto_token VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS crypto_amount VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS crypto_treasury_address TEXT,
+    ADD COLUMN IF NOT EXISTS crypto_sender_address TEXT,
+    ADD COLUMN IF NOT EXISTS crypto_token_contract TEXT,
+    ADD COLUMN IF NOT EXISTS crypto_token_price_usd VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS crypto_tx_hash TEXT,
+    ADD COLUMN IF NOT EXISTS crypto_quote_expires_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connect_checkouts_crypto_tx_hash_unique
+    ON connect_checkouts (crypto_tx_hash)
+    WHERE crypto_tx_hash IS NOT NULL;
+
 COMMIT;
