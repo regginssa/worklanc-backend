@@ -19,7 +19,7 @@ const toPublicCryptoRow = (row) => ({
   provider: "crypto",
   address: row.crypto_address,
   chain: row.crypto_chain,
-  token: row.crypto_token,
+  token: row.crypto_token ?? null,
   label: row.crypto_label,
   isDefault: row.is_default,
   createdAt: row.created_at,
@@ -67,15 +67,14 @@ const countCardsByUserId = async (userId) => {
   return result.rows[0]?.count ?? 0;
 };
 
-const getCryptoByUserChainAndToken = async (userId, chain, token) => {
+const getCryptoByUserChain = async (userId, chain) => {
   const result = await pool.query(
     `SELECT *
      FROM payment_methods
      WHERE user_id = $1
        AND type = 'crypto'
-       AND crypto_chain = $2
-       AND crypto_token = $3`,
-    [userId, chain, token],
+       AND crypto_chain = $2`,
+    [userId, chain],
   );
   return result.rows[0] ?? null;
 };
@@ -133,7 +132,6 @@ const createCrypto = async ({
   userId,
   address,
   chain,
-  token,
   label,
   isDefault = true,
 }) => {
@@ -144,13 +142,12 @@ const createCrypto = async ({
        provider,
        crypto_address,
        crypto_chain,
-       crypto_token,
        crypto_label,
        is_default
      )
-     VALUES ($1, 'crypto', 'crypto', $2, $3, $4, $5, $6)
+     VALUES ($1, 'crypto', 'crypto', $2, $3, $4, $5)
      RETURNING *`,
-    [userId, address, chain, token, label ?? null, isDefault],
+    [userId, address, chain, label ?? null, isDefault],
   );
   return toPublicCryptoRow(result.rows[0]);
 };
@@ -200,7 +197,6 @@ const updateCrypto = async (uid, userId, data) => {
   const fieldMap = {
     address: "crypto_address",
     chain: "crypto_chain",
-    token: "crypto_token",
     label: "crypto_label",
     isDefault: "is_default",
   };
@@ -241,7 +237,7 @@ module.exports = {
   listCardsByUserId,
   listCryptoByUserId,
   getByUidAndUserId,
-  getCryptoByUserChainAndToken,
+  getCryptoByUserChain,
   countCardsByUserId,
   countCryptoByUserId,
   createCard,

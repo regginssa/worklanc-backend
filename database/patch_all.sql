@@ -501,11 +501,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_user_card_unique
     ON payment_methods (user_id)
     WHERE type = 'card';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_user_crypto_chain_token_unique
-    ON payment_methods (user_id, crypto_chain, crypto_token)
+DROP INDEX IF EXISTS idx_payment_methods_user_crypto_chain_token_unique;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_user_crypto_chain_unique
+    ON payment_methods (user_id, crypto_chain)
     WHERE type = 'crypto'
-      AND crypto_chain IS NOT NULL
-      AND crypto_token IS NOT NULL;
+      AND crypto_chain IS NOT NULL;
 
 DROP INDEX IF EXISTS idx_payment_methods_user_crypto_unique;
 

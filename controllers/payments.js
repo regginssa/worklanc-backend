@@ -95,7 +95,7 @@ const saveStripePaymentMethod = async (req, res) => {
 
 const saveCryptoWallet = async (req, res) => {
   try {
-    const { address, chain, token, label } = req.body ?? {};
+    const { address, chain, label } = req.body ?? {};
 
     if (!address || typeof address !== "string") {
       return res.status(400).json({ message: "address is required" });
@@ -103,19 +103,14 @@ const saveCryptoWallet = async (req, res) => {
     if (!chain || !VALID_CRYPTO_CHAINS.has(chain)) {
       return res.status(400).json({ message: "Unsupported chain." });
     }
-    if (!token || typeof token !== "string") {
-      return res.status(400).json({ message: "token is required" });
-    }
 
-    const existing = await PaymentMethods.getCryptoByUserChainAndToken(
+    const existing = await PaymentMethods.getCryptoByUserChain(
       req.user.id,
       chain,
-      token,
     );
     if (existing) {
       return res.status(409).json({
-        message:
-          "You already have a billing method for this network and token.",
+        message: "You already have a billing method for this network.",
       });
     }
 
@@ -123,7 +118,6 @@ const saveCryptoWallet = async (req, res) => {
       userId: req.user.id,
       address: address.trim(),
       chain,
-      token,
       label: label?.trim() || null,
       isDefault: true,
     });
@@ -132,7 +126,7 @@ const saveCryptoWallet = async (req, res) => {
   } catch (e) {
     if (e.code === "23505") {
       return res.status(409).json({
-        message: "This wallet is already linked to another account.",
+        message: "You already have a billing method for this network.",
       });
     }
     console.error("saveCryptoWallet error: ", e);
