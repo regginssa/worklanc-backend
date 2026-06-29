@@ -518,7 +518,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_crypto_address_chain
 -- 11. Connect bundles + checkouts
 -- ---------------------------------------------------------------------------
 ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS available_connects INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS connects_balance INTEGER NOT NULL DEFAULT 0;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'available_connects'
+    ) THEN
+        UPDATE users
+        SET connects_balance = COALESCE(connects_balance, 0) + COALESCE(available_connects, 0)
+        WHERE available_connects IS NOT NULL AND available_connects <> 0;
+
+        ALTER TABLE users DROP COLUMN available_connects;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS connect_bundle_options (
     id              SERIAL PRIMARY KEY,
@@ -593,5 +607,8 @@ CREATE TRIGGER trg_connect_checkouts_updated_at
 
 ALTER TABLE connect_checkouts
     ADD COLUMN IF NOT EXISTS connects_expire_at TIMESTAMPTZ;
+
+ALTER TABLE connect_checkouts
+    ADD COLUMN IF NOT EXISTS connects_credited BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMIT;

@@ -66,6 +66,16 @@ const listBundles = async (req, res) => {
   }
 };
 
+const getConnectsBalance = async (req, res) => {
+  try {
+    const connectsBalance = await Users.getConnectsBalance(req.user.id);
+    return res.status(200).json({ connectsBalance });
+  } catch (e) {
+    console.error("getConnectsBalance error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 const createCheckout = async (req, res) => {
   try {
     const connectAmount = Number(req.body?.connectAmount);
@@ -285,9 +295,10 @@ const payCheckoutWithCard = async (req, res) => {
     }
 
     if (checkoutRow.status === "completed") {
+      const connectsBalance = await Users.getConnectsBalance(req.user.id);
       return res.status(200).json({
         checkout: ConnectCheckouts.toPublicCheckoutRow(checkoutRow),
-        availableConnects: req.user.available_connects,
+        connectsBalance,
         alreadyPaid: true,
       });
     }
@@ -376,24 +387,22 @@ const payCheckoutWithCard = async (req, res) => {
         });
       }
 
-      const completed = await ConnectCheckouts.markCompleted(
+      const completion = await ConnectCheckouts.completeAndCreditConnects(
         uid,
         req.user.id,
         paymentIntent.id,
-      );
-
-      if (!completed) {
-        return res.status(409).json({ message: "Payment recorded inconsistently. Contact support." });
-      }
-
-      const availableConnects = await Users.addAvailableConnects(
-        req.user.id,
         checkoutRow.connect_amount,
       );
 
+      if (!completion?.checkout) {
+        return res.status(409).json({
+          message: "Payment recorded inconsistently. Contact support.",
+        });
+      }
+
       return res.status(200).json({
-        checkout: ConnectCheckouts.toPublicCheckoutRow(completed),
-        availableConnects,
+        checkout: ConnectCheckouts.toPublicCheckoutRow(completion.checkout),
+        connectsBalance: completion.connectsBalance,
       });
     } catch (stripeError) {
       const message =
@@ -416,6 +425,7 @@ const payCheckoutWithCard = async (req, res) => {
 
 module.exports = {
   listBundles,
+  getConnectsBalance,
   createCheckout,
   applyCheckoutPromo,
   getCheckout,

@@ -134,6 +134,109 @@ const markCompleted = async (uid, userId, stripePaymentIntentId) => {
   return result.rows[0] ?? null;
 };
 
+const completeAndCreditConnects = async (
+  uid,
+  userId,
+  stripePaymentIntentId,
+  connectAmount,
+) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const checkoutResult = await client.query(
+      `UPDATE connect_checkouts
+       SET status = 'completed',
+           stripe_payment_intent_id = $3,
+           completed_at = NOW(),
+           connects_expire_at = NOW() + INTERVAL '1 year',
+           connects_credited = TRUE,
+           updated_at = NOW()
+       WHERE uid = $1
+         AND user_id = $2
+         AND status = 'processing'
+         AND connects_credited = FALSE
+       RETURNING *`,
+      [uid, userId, stripePaymentIntentId],
+    );
+
+    let checkoutRow = checkoutResult.rows[0] ?? null;
+
+    if (!checkoutRow) {
+      const existing = await client.query(
+        `SELECT *
+         FROM connect_checkouts
+         WHERE uid = $1 AND user_id = $2`,
+        [uid, userId],
+      );
+      checkoutRow = existing.rows[0] ?? null;
+
+      if (
+        checkoutRow?.status === "completed" &&
+        checkoutRow.connects_credited === false
+      ) {
+        const creditResult = await client.query(
+          `UPDATE users
+           SET connects_balance = COALESCE(connects_balance, 0) + $2
+           WHERE id = $1
+           RETURNING connects_balance`,
+          [userId, connectAmount],
+        );
+
+        await client.query(
+          `UPDATE connect_checkouts
+           SET connects_credited = TRUE, updated_at = NOW()
+           WHERE uid = $1 AND user_id = $2`,
+          [uid, userId],
+        );
+
+        await client.query("COMMIT");
+
+        return {
+          checkout: checkoutRow,
+          connectsBalance: creditResult.rows[0]?.connects_balance ?? 0,
+        };
+      }
+
+      await client.query("COMMIT");
+
+      if (checkoutRow?.status === "completed") {
+        const balanceResult = await client.query(
+          `SELECT connects_balance FROM users WHERE id = $1`,
+          [userId],
+        );
+        return {
+          checkout: checkoutRow,
+          connectsBalance: balanceResult.rows[0]?.connects_balance ?? 0,
+        };
+      }
+
+      return null;
+    }
+
+    const balanceResult = await client.query(
+      `UPDATE users
+       SET connects_balance = COALESCE(connects_balance, 0) + $2
+       WHERE id = $1
+       RETURNING connects_balance`,
+      [userId, connectAmount],
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      checkout: checkoutRow,
+      connectsBalance: balanceResult.rows[0]?.connects_balance ?? 0,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 const updatePromoAndPricing = async (
   uid,
   userId,
@@ -218,6 +321,7 @@ module.exports = {
   getPublicByUidAndUserId,
   markProcessing,
   markCompleted,
+  completeAndCreditConnects,
   markFailed,
   resetToPending,
   updatePromoAndPricing,

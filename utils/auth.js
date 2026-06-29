@@ -109,6 +109,7 @@ const toPublicUser = (user, accounts = []) => ({
   zipCode: user.zip_code || null,
   timezone: user.timezone || null,
   marketingOptIn: user.marketing_opt_in,
+  connectsBalance: user.connects_balance ?? 0,
   createdAt: user.created_at,
   accounts: accounts.map(toPublicAccount),
 });

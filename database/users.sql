@@ -108,6 +108,9 @@ CREATE TABLE users (
     -- "Send me helpful emails / job leads" opt-in from sign-up.
     marketing_opt_in  BOOLEAN NOT NULL DEFAULT TRUE,
 
+    -- Connect balance for talent job proposals.
+    connects_balance    INTEGER NOT NULL DEFAULT 0,
+
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

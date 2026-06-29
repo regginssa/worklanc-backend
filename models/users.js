@@ -173,15 +173,23 @@ const getByUid = async (uid) => {
   return result.rows[0] || null;
 };
 
-const addAvailableConnects = async (id, amount) => {
+const getConnectsBalance = async (id) => {
   const result = await pool.query(
+    `SELECT connects_balance FROM users WHERE id = $1`,
+    [id],
+  );
+  return result.rows[0]?.connects_balance ?? 0;
+};
+
+const addConnectsBalance = async (id, amount, client = pool) => {
+  const result = await client.query(
     `UPDATE users
-     SET available_connects = COALESCE(available_connects, 0) + $2
+     SET connects_balance = COALESCE(connects_balance, 0) + $2
      WHERE id = $1
-     RETURNING available_connects`,
+     RETURNING connects_balance`,
     [id, amount],
   );
-  return result.rows[0]?.available_connects ?? 0;
+  return result.rows[0]?.connects_balance ?? 0;
 };
 
 module.exports = {
@@ -199,5 +207,6 @@ module.exports = {
   setPasswordHash,
   deleteOne,
   normalizeEmail,
-  addAvailableConnects,
+  addConnectsBalance,
+  getConnectsBalance,
 };

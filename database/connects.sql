@@ -4,9 +4,9 @@
 BEGIN;
 
 ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS available_connects INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS connects_balance INTEGER NOT NULL DEFAULT 0;
 
-COMMENT ON COLUMN users.available_connects IS
+COMMENT ON COLUMN users.connects_balance IS
     'Connect balance available to the talent account for proposals.';
 
 CREATE TABLE IF NOT EXISTS connect_bundle_options (
@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS connect_checkouts (
     completed_at                TIMESTAMPTZ,
     cancelled_at                TIMESTAMPTZ,
     expires_at                  TIMESTAMPTZ NOT NULL,
+    connects_expire_at          TIMESTAMPTZ,
+    connects_credited           BOOLEAN NOT NULL DEFAULT FALSE,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
