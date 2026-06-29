@@ -48,10 +48,33 @@ const retrievePaymentMethod = async (paymentMethodId) => {
   return client.paymentMethods.retrieve(paymentMethodId);
 };
 
+const createAndConfirmPaymentIntent = async ({
+  amountCents,
+  customerId,
+  paymentMethodId,
+  metadata,
+  idempotencyKey,
+}) => {
+  const client = getStripe();
+  return client.paymentIntents.create(
+    {
+      amount: amountCents,
+      currency: "usd",
+      customer: customerId,
+      payment_method: paymentMethodId,
+      off_session: true,
+      confirm: true,
+      metadata,
+    },
+    idempotencyKey ? { idempotencyKey } : undefined,
+  );
+};
+
 module.exports = {
   getStripe,
   createCustomer,
   attachPaymentMethod,
   detachPaymentMethod,
   retrievePaymentMethod,
+  createAndConfirmPaymentIntent,
 };
