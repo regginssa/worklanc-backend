@@ -65,6 +65,17 @@ const calculatePricing = (bundle, promoCode) => {
   return { subtotalCents, discountCents, totalCents };
 };
 
+const toCryptoPaymentPayload = (checkoutRow) => ({
+  chain: checkoutRow.crypto_chain,
+  token: checkoutRow.crypto_token,
+  amount: checkoutRow.crypto_amount,
+  treasuryAddress: checkoutRow.crypto_treasury_address,
+  senderAddress: checkoutRow.crypto_sender_address,
+  tokenContract: checkoutRow.crypto_token_contract,
+  quoteExpiresAt: checkoutRow.crypto_quote_expires_at,
+  checkoutUid: checkoutRow.uid,
+});
+
 const listBundles = async (req, res) => {
   try {
     const bundles = await ConnectBundleOptions.listActive();
@@ -500,6 +511,25 @@ const prepareCheckoutCryptoPayment = async (req, res) => {
       return res.status(400).json({ message: tokenValidation.error });
     }
 
+    const hasReusableCryptoQuote =
+      checkoutRow.status === "processing" &&
+      checkoutRow.payment_method === "crypto" &&
+      checkoutRow.saved_payment_method_uid === cryptoWalletUid &&
+      checkoutRow.crypto_chain === chain &&
+      checkoutRow.crypto_token === cryptoToken &&
+      checkoutRow.crypto_amount &&
+      checkoutRow.crypto_treasury_address &&
+      checkoutRow.crypto_sender_address &&
+      checkoutRow.crypto_quote_expires_at &&
+      new Date(checkoutRow.crypto_quote_expires_at).getTime() > Date.now();
+
+    if (hasReusableCryptoQuote) {
+      return res.status(200).json({
+        checkout: ConnectCheckouts.toPublicCheckoutRow(checkoutRow),
+        payment: toCryptoPaymentPayload(checkoutRow),
+      });
+    }
+
     const prices = await fetchTokenPricesUsd();
     const priceUsd = prices[cryptoToken];
     const quote = convertUsdCentsToCryptoAmount(
@@ -536,16 +566,7 @@ const prepareCheckoutCryptoPayment = async (req, res) => {
 
     return res.status(200).json({
       checkout: ConnectCheckouts.toPublicCheckoutRow(locked),
-      payment: {
-        chain,
-        token: cryptoToken,
-        amount: quote.amount,
-        treasuryAddress: tokenValidation.treasury,
-        senderAddress: savedWallet.crypto_address,
-        tokenContract: tokenValidation.contract,
-        quoteExpiresAt: quoteExpiresAt.toISOString(),
-        checkoutUid: uid,
-      },
+      payment: toCryptoPaymentPayload(locked),
     });
   } catch (e) {
     console.error("prepareCheckoutCryptoPayment error: ", e);
