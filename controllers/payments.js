@@ -107,10 +107,15 @@ const saveCryptoWallet = async (req, res) => {
       return res.status(400).json({ message: "token is required" });
     }
 
-    const existingCount = await PaymentMethods.countCryptoByUserId(req.user.id);
-    if (existingCount > 0) {
+    const existing = await PaymentMethods.getCryptoByUserChainAndToken(
+      req.user.id,
+      chain,
+      token,
+    );
+    if (existing) {
       return res.status(409).json({
-        message: "You can only save one crypto wallet.",
+        message:
+          "You already have a billing method for this network and token.",
       });
     }
 
@@ -182,22 +187,14 @@ const updatePaymentMethod = async (req, res) => {
     }
 
     if (existing.type === "crypto") {
-      const { address, chain, token, label } = req.body ?? {};
+      const { address, label } = req.body ?? {};
 
       if (!address || typeof address !== "string") {
         return res.status(400).json({ message: "address is required" });
       }
-      if (!chain || !VALID_CRYPTO_CHAINS.has(chain)) {
-        return res.status(400).json({ message: "Unsupported chain." });
-      }
-      if (!token || typeof token !== "string") {
-        return res.status(400).json({ message: "token is required" });
-      }
 
       const wallet = await PaymentMethods.updateCrypto(uid, req.user.id, {
         address: address.trim(),
-        chain,
-        token,
         label: label?.trim() || null,
       });
 

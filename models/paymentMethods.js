@@ -67,6 +67,19 @@ const countCardsByUserId = async (userId) => {
   return result.rows[0]?.count ?? 0;
 };
 
+const getCryptoByUserChainAndToken = async (userId, chain, token) => {
+  const result = await pool.query(
+    `SELECT *
+     FROM payment_methods
+     WHERE user_id = $1
+       AND type = 'crypto'
+       AND crypto_chain = $2
+       AND crypto_token = $3`,
+    [userId, chain, token],
+  );
+  return result.rows[0] ?? null;
+};
+
 const countCryptoByUserId = async (userId) => {
   const result = await pool.query(
     `SELECT COUNT(*)::int AS count
@@ -228,6 +241,7 @@ module.exports = {
   listCardsByUserId,
   listCryptoByUserId,
   getByUidAndUserId,
+  getCryptoByUserChainAndToken,
   countCardsByUserId,
   countCryptoByUserId,
   createCard,
