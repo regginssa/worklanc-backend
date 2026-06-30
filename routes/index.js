@@ -12,5 +12,6 @@ router.use("/phone-verification", require("./phoneVerification"));
 router.use("/jobs", require("./jobs"));
 router.use("/payments", require("./payments"));
 router.use("/connects", require("./connects"));
+router.use("/disbursements", require("./disbursements"));
 
 module.exports = router;
