@@ -96,6 +96,23 @@ const getConnectsBalance = async (req, res) => {
   }
 };
 
+const listHistory = async (req, res) => {
+  try {
+    const search = req.query.search ?? "";
+    const dateRange = req.query.dateRange ?? "last-30-days";
+
+    const transactions = await ConnectCheckouts.listUserHistory(req.user.id, {
+      search,
+      dateRange,
+    });
+
+    return res.status(200).json({ transactions });
+  } catch (e) {
+    console.error("listHistory error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 const createCheckout = async (req, res) => {
   try {
     const connectAmount = Number(req.body?.connectAmount);
@@ -683,6 +700,7 @@ const confirmCheckoutCryptoPayment = async (req, res) => {
 module.exports = {
   listBundles,
   getConnectsBalance,
+  listHistory,
   createCheckout,
   applyCheckoutPromo,
   getCheckout,

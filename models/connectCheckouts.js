@@ -398,9 +398,98 @@ const resetToPending = async (uid, userId) => {
   return result.rows[0] ?? null;
 };
 
+const HISTORY_DATE_RANGES = {
+  "last-7-days": 7,
+  "last-30-days": 30,
+  "last-90-days": 90,
+};
+
+const toPublicHistoryRow = (row) => ({
+  uid: row.uid,
+  connectAmount: row.connect_amount,
+  totalCents: row.total_cents,
+  discountCents: row.discount_cents,
+  promoCode: row.promo_code,
+  status: row.status,
+  paymentMethod: row.payment_method,
+  completedAt: row.completed_at,
+  connectsExpireAt: row.connects_expire_at,
+  createdAt: row.created_at,
+  cryptoToken: row.crypto_token,
+  cryptoAmount: row.crypto_amount,
+  cryptoTxHash: row.crypto_tx_hash,
+});
+
+const listUserHistory = async (
+  userId,
+  { search = "", dateRange = "last-30-days" } = {},
+) => {
+  const days = HISTORY_DATE_RANGES[dateRange] ?? 30;
+  const trimmedSearch = String(search ?? "")
+    .trim()
+    .replace(/^\$/, "");
+  const searchPattern = trimmedSearch ? `%${trimmedSearch}%` : null;
+
+  const params = [userId, days];
+  let searchClause = "";
+
+  if (searchPattern) {
+    params.push(searchPattern);
+    const searchIndex = params.length;
+    searchClause = `AND (
+      uid ILIKE $${searchIndex}
+      OR CAST(connect_amount AS TEXT) ILIKE $${searchIndex}
+      OR CAST(total_cents AS TEXT) ILIKE $${searchIndex}
+      OR (total_cents::numeric / 100)::text ILIKE $${searchIndex}
+      OR COALESCE(promo_code, '') ILIKE $${searchIndex}
+      OR COALESCE(payment_method, '') ILIKE $${searchIndex}
+      OR COALESCE(
+        CASE payment_method
+          WHEN 'card' THEN 'credit card'
+          WHEN 'paypal' THEN 'paypal'
+          WHEN 'crypto' THEN 'crypto'
+          ELSE payment_method
+        END,
+        ''
+      ) ILIKE $${searchIndex}
+      OR COALESCE(crypto_token, '') ILIKE $${searchIndex}
+      OR COALESCE(crypto_amount, '') ILIKE $${searchIndex}
+      OR COALESCE(crypto_tx_hash, '') ILIKE $${searchIndex}
+    )`;
+  }
+
+  const result = await pool.query(
+    `SELECT
+       uid,
+       connect_amount,
+       total_cents,
+       discount_cents,
+       promo_code,
+       status,
+       payment_method,
+       completed_at,
+       connects_expire_at,
+       created_at,
+       crypto_token,
+       crypto_amount,
+       crypto_tx_hash
+     FROM connect_checkouts
+     WHERE user_id = $1
+       AND status = 'completed'
+       AND completed_at IS NOT NULL
+       AND completed_at >= NOW() - ($2 || ' days')::interval
+       ${searchClause}
+     ORDER BY completed_at DESC`,
+    params,
+  );
+
+  return result.rows.map(toPublicHistoryRow);
+};
+
 module.exports = {
   CHECKOUT_TTL_DAYS,
   toPublicCheckoutRow,
+  toPublicHistoryRow,
   expireStaleForUser,
   findReusablePending,
   createPending,
@@ -415,4 +504,5 @@ module.exports = {
   resetToPending,
   updatePromoAndPricing,
   syncPricing,
+  listUserHistory,
 };
