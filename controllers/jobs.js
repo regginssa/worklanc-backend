@@ -14,6 +14,14 @@ const {
 const getClientAccount = async (userId) =>
   Accounts.getByUserAndType(userId, "client");
 
+const parseListParam = (value) => {
+  if (!value || typeof value !== "string") return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 const mergeJob = (existing, patch) => ({
   title: patch.title !== undefined ? patch.title : existing.title,
   skills:
@@ -96,7 +104,27 @@ const assertJobOwnership = async (req, uid) => {
 const browseList = async (req, res) => {
   try {
     const userId = req.user?.id ?? null;
-    const rows = await Jobs.listOpenForBrowse(userId);
+    const filters = {
+      keyword:
+        typeof req.query.keyword === "string" ? req.query.keyword.trim() : "",
+      sortBy: typeof req.query.sortBy === "string" ? req.query.sortBy : "",
+      categorySlugs: parseListParam(req.query.category),
+      experienceLevels: parseListParam(req.query.experienceLevel),
+      budgetTypes: parseListParam(req.query.jobType),
+      duration: parseListParam(req.query.projectLength),
+      hoursPerWeek: parseListParam(req.query.hoursPerWeek),
+      contractToHire: parseListParam(req.query.jobDuration),
+      locations: [
+        ...parseListParam(req.query.location),
+        ...parseListParam(req.query.clientLocation),
+        ...parseListParam(req.query.clientTimezones),
+      ],
+      minHourlyRate: req.query.minHourlyRate,
+      maxHourlyRate: req.query.maxHourlyRate,
+      minFixedPrice: req.query.minFixedPrice,
+      maxFixedPrice: req.query.maxFixedPrice,
+    };
+    const rows = await Jobs.listOpenForBrowse(userId, filters);
     const { toBrowseListItem } = require("../utils/jobBrowse");
     return res.status(200).json({
       jobs: rows.map(toBrowseListItem),

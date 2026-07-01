@@ -80,7 +80,137 @@ const BROWSE_CLIENT_STATS_SQL = `
   GROUP BY a.id, u.id
 `;
 
-const listOpenForBrowse = async (userId = null) => {
+const parseNumber = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const listOpenForBrowse = async (userId = null, filters = {}) => {
+  const where = [
+    `j.status = 'open'`,
+    `j.title IS NOT NULL`,
+    `char_length(trim(j.title)) > 0`,
+  ];
+  const values = [userId];
+  let index = 2;
+
+  if (filters.keyword) {
+    where.push(`(
+      j.title ILIKE $${index}
+      OR COALESCE(j.description, '') ILIKE $${index}
+      OR EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(j.skills, '[]'::jsonb)) AS skill
+        WHERE COALESCE(skill->>'label', '') ILIKE $${index}
+          OR COALESCE(skill->>'value', '') ILIKE $${index}
+      )
+    )`);
+    values.push(`%${filters.keyword}%`);
+    index += 1;
+  }
+
+  if (filters.categorySlugs?.length) {
+    where.push(`j.category_slug = ANY($${index}::text[])`);
+    values.push(filters.categorySlugs);
+    index += 1;
+  }
+
+  if (filters.experienceLevels?.length) {
+    where.push(`j.experience_level = ANY($${index}::text[])`);
+    values.push(filters.experienceLevels);
+    index += 1;
+  }
+
+  if (filters.budgetTypes?.length) {
+    where.push(`j.budget_type = ANY($${index}::text[])`);
+    values.push(filters.budgetTypes);
+    index += 1;
+  }
+
+  if (filters.duration?.length) {
+    where.push(`j.duration = ANY($${index}::text[])`);
+    values.push(filters.duration);
+    index += 1;
+  }
+
+  if (filters.hoursPerWeek?.length) {
+    where.push(`j.hours_per_week = ANY($${index}::text[])`);
+    values.push(filters.hoursPerWeek);
+    index += 1;
+  }
+
+  if (filters.contractToHire?.length) {
+    where.push(`j.contract_to_hire = ANY($${index}::text[])`);
+    values.push(filters.contractToHire);
+    index += 1;
+  }
+
+  if (filters.locations?.length) {
+    where.push(`(
+      j.location_type = ANY($${index}::text[])
+      OR EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements_text(COALESCE(j.location_preferences, '[]'::jsonb)) AS pref
+        WHERE pref = ANY($${index}::text[])
+      )
+    )`);
+    values.push(filters.locations);
+    index += 1;
+  }
+
+  const minHourlyRate = parseNumber(filters.minHourlyRate);
+  if (minHourlyRate !== null) {
+    where.push(`(
+      j.budget_type <> 'hourly'
+      OR j.budget_max IS NULL
+      OR j.budget_max >= $${index}
+    )`);
+    values.push(minHourlyRate);
+    index += 1;
+  }
+
+  const maxHourlyRate = parseNumber(filters.maxHourlyRate);
+  if (maxHourlyRate !== null) {
+    where.push(`(
+      j.budget_type <> 'hourly'
+      OR j.budget_min IS NULL
+      OR j.budget_min <= $${index}
+    )`);
+    values.push(maxHourlyRate);
+    index += 1;
+  }
+
+  const minFixedPrice = parseNumber(filters.minFixedPrice);
+  if (minFixedPrice !== null) {
+    where.push(`(
+      j.budget_type <> 'fixed'
+      OR j.budget_fixed IS NULL
+      OR j.budget_fixed >= $${index}
+    )`);
+    values.push(minFixedPrice);
+    index += 1;
+  }
+
+  const maxFixedPrice = parseNumber(filters.maxFixedPrice);
+  if (maxFixedPrice !== null) {
+    where.push(`(
+      j.budget_type <> 'fixed'
+      OR j.budget_fixed IS NULL
+      OR j.budget_fixed <= $${index}
+    )`);
+    values.push(maxFixedPrice);
+    index += 1;
+  }
+
+  const orderByMap = {
+    best_matches: "j.published_at DESC NULLS LAST, j.created_at DESC",
+    most_recent: "j.published_at DESC NULLS LAST, j.created_at DESC",
+    client_spend: "stats.completed_jobs DESC, j.published_at DESC NULLS LAST",
+    client_rating: "stats.completed_jobs DESC, stats.jobs_posted DESC, j.published_at DESC NULLS LAST",
+  };
+  const orderBy = orderByMap[filters.sortBy] || orderByMap.best_matches;
+
   const result = await pool.query(
     `SELECT
       j.*,
@@ -100,11 +230,9 @@ const listOpenForBrowse = async (userId = null) => {
     JOIN LATERAL (${BROWSE_CLIENT_STATS_SQL}) stats ON true
     LEFT JOIN job_reads jr
       ON jr.job_id = j.id AND jr.user_id = $1
-    WHERE j.status = 'open'
-      AND j.title IS NOT NULL
-      AND char_length(trim(j.title)) > 0
-    ORDER BY j.published_at DESC NULLS LAST, j.created_at DESC`,
-    [userId],
+    WHERE ${where.join(" AND ")}
+    ORDER BY ${orderBy}`,
+    values,
   );
   return result.rows;
 };
