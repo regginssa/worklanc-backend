@@ -86,6 +86,12 @@ const parseNumber = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const splitWords = (value) =>
+  String(value || "")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+
 const listOpenForBrowse = async (userId = null, filters = {}) => {
   const where = [
     `j.status = 'open'`,
@@ -107,6 +113,90 @@ const listOpenForBrowse = async (userId = null, filters = {}) => {
       )
     )`);
     values.push(`%${filters.keyword}%`);
+    index += 1;
+  }
+
+  const allWords = splitWords(filters.allOfTheseWords);
+  allWords.forEach((word) => {
+    where.push(`(
+      j.title ILIKE $${index}
+      OR COALESCE(j.description, '') ILIKE $${index}
+      OR EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(j.skills, '[]'::jsonb)) AS skill
+        WHERE COALESCE(skill->>'label', '') ILIKE $${index}
+          OR COALESCE(skill->>'value', '') ILIKE $${index}
+      )
+    )`);
+    values.push(`%${word}%`);
+    index += 1;
+  });
+
+  const anyWords = splitWords(filters.anyOfTheseWords);
+  if (anyWords.length > 0) {
+    const placeholders = anyWords.map(() => `$${index++}`);
+    where.push(`(
+      EXISTS (
+        SELECT 1
+        FROM unnest(ARRAY[${placeholders.join(", ")}]::text[]) AS needle
+        WHERE j.title ILIKE needle
+          OR COALESCE(j.description, '') ILIKE needle
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(COALESCE(j.skills, '[]'::jsonb)) AS skill
+            WHERE COALESCE(skill->>'label', '') ILIKE needle
+              OR COALESCE(skill->>'value', '') ILIKE needle
+          )
+      )
+    )`);
+    values.push(...anyWords.map((word) => `%${word}%`));
+  }
+
+  const noneWords = splitWords(filters.noneOfTheseWords);
+  noneWords.forEach((word) => {
+    where.push(`NOT (
+      j.title ILIKE $${index}
+      OR COALESCE(j.description, '') ILIKE $${index}
+      OR EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(j.skills, '[]'::jsonb)) AS skill
+        WHERE COALESCE(skill->>'label', '') ILIKE $${index}
+          OR COALESCE(skill->>'value', '') ILIKE $${index}
+      )
+    )`);
+    values.push(`%${word}%`);
+    index += 1;
+  });
+
+  if (filters.exactPhrase) {
+    where.push(`(
+      j.title ILIKE $${index}
+      OR COALESCE(j.description, '') ILIKE $${index}
+      OR EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(j.skills, '[]'::jsonb)) AS skill
+        WHERE COALESCE(skill->>'label', '') ILIKE $${index}
+          OR COALESCE(skill->>'value', '') ILIKE $${index}
+      )
+    )`);
+    values.push(`%${filters.exactPhrase.trim()}%`);
+    index += 1;
+  }
+
+  if (filters.titleSearch) {
+    where.push(`j.title ILIKE $${index}`);
+    values.push(`%${filters.titleSearch.trim()}%`);
+    index += 1;
+  }
+
+  if (filters.skillsSearch) {
+    where.push(`EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(j.skills, '[]'::jsonb)) AS skill
+      WHERE COALESCE(skill->>'label', '') ILIKE $${index}
+        OR COALESCE(skill->>'value', '') ILIKE $${index}
+    )`);
+    values.push(`%${filters.skillsSearch.trim()}%`);
     index += 1;
   }
 

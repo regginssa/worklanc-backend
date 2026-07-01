@@ -10,6 +10,7 @@ router.use("/upload", require("./upload"));
 router.use("/geocoding", require("./geocoding"));
 router.use("/phone-verification", require("./phoneVerification"));
 router.use("/jobs", require("./jobs"));
+router.use("/job-saved-searches", require("./jobSavedSearches"));
 router.use("/payments", require("./payments"));
 router.use("/connects", require("./connects"));
 router.use("/disbursements", require("./disbursements"));

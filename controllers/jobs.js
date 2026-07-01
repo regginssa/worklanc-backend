@@ -22,6 +22,14 @@ const parseListParam = (value) => {
     .filter(Boolean);
 };
 
+const mapSortParam = (value) => {
+  if (!value || typeof value !== "string") return "";
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "relevance+desc") return "best_matches";
+  if (normalized === "created_at+desc") return "most_recent";
+  return value;
+};
+
 const mergeJob = (existing, patch) => ({
   title: patch.title !== undefined ? patch.title : existing.title,
   skills:
@@ -106,8 +114,12 @@ const browseList = async (req, res) => {
     const userId = req.user?.id ?? null;
     const filters = {
       keyword:
-        typeof req.query.keyword === "string" ? req.query.keyword.trim() : "",
-      sortBy: typeof req.query.sortBy === "string" ? req.query.sortBy : "",
+        typeof req.query.q === "string"
+          ? req.query.q.trim()
+          : typeof req.query.keyword === "string"
+            ? req.query.keyword.trim()
+            : "",
+      sortBy: mapSortParam(req.query.sort || req.query.sortBy),
       categorySlugs: parseListParam(req.query.category),
       experienceLevels: parseListParam(req.query.experienceLevel),
       budgetTypes: parseListParam(req.query.jobType),
@@ -123,6 +135,24 @@ const browseList = async (req, res) => {
       maxHourlyRate: req.query.maxHourlyRate,
       minFixedPrice: req.query.minFixedPrice,
       maxFixedPrice: req.query.maxFixedPrice,
+      allOfTheseWords:
+        typeof req.query.allOfTheseWords === "string"
+          ? req.query.allOfTheseWords
+          : "",
+      anyOfTheseWords:
+        typeof req.query.anyOfTheseWords === "string"
+          ? req.query.anyOfTheseWords
+          : "",
+      noneOfTheseWords:
+        typeof req.query.noneOfTheseWords === "string"
+          ? req.query.noneOfTheseWords
+          : "",
+      exactPhrase:
+        typeof req.query.exactPhrase === "string" ? req.query.exactPhrase : "",
+      titleSearch:
+        typeof req.query.titleSearch === "string" ? req.query.titleSearch : "",
+      skillsSearch:
+        typeof req.query.skillsSearch === "string" ? req.query.skillsSearch : "",
     };
     const rows = await Jobs.listOpenForBrowse(userId, filters);
     const { toBrowseListItem } = require("../utils/jobBrowse");
