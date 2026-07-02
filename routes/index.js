@@ -14,5 +14,6 @@ router.use("/job-saved-searches", require("./jobSavedSearches"));
 router.use("/payments", require("./payments"));
 router.use("/connects", require("./connects"));
 router.use("/disbursements", require("./disbursements"));
+router.use("/security", require("./security"));
 
 module.exports = router;

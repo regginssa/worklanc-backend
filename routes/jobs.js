@@ -2,10 +2,26 @@ const router = require("express").Router();
 const controllers = require("../controllers/jobs");
 const requireAuth = require("../middleware/requireAuth");
 const optionalAuth = require("../middleware/optionalAuth");
+const requireTurnstileSession = require("../middleware/requireTurnstileSession");
 
-router.get("/browse", optionalAuth, controllers.browseList);
-router.get("/browse/:uid", optionalAuth, controllers.browseOne);
-router.post("/browse/:uid/read", requireAuth, controllers.markBrowseRead);
+router.get(
+  "/browse",
+  optionalAuth,
+  requireTurnstileSession("find_work"),
+  controllers.browseList
+);
+router.get(
+  "/browse/:uid",
+  optionalAuth,
+  requireTurnstileSession("find_work"),
+  controllers.browseOne
+);
+router.post(
+  "/browse/:uid/read",
+  requireAuth,
+  requireTurnstileSession("find_work"),
+  controllers.markBrowseRead
+);
 
 router.post("/", requireAuth, controllers.create);
 router.get("/", requireAuth, controllers.list);
