@@ -1,4 +1,7 @@
 const router = require("express").Router();
+const requireTurnstileIfVpn = require("../middleware/requireTurnstileIfVpn");
+
+router.use(requireTurnstileIfVpn);
 
 router.use("/auth", require("./auth"));
 router.use("/accounts", require("./accounts"));

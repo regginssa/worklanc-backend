@@ -1,45 +1,52 @@
+const { getClientIp } = require("../utils/clientIp");
+const { isRiskyConnection } = require("../services/vpnDetection");
 const { verifyTurnstileToken } = require("../services/turnstile");
 const {
-  issueTurnstileSession,
-  TURNSTILE_SESSION_TTL_SECONDS,
-} = require("../utils/turnstileSession");
+  isIpTurnstileVerified,
+  markIpTurnstileVerified,
+} = require("../services/turnstileIpCache");
 
-const ALLOWED_SCOPES = new Set(["find_work", "freelancer_profile"]);
+const getRisk = async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    const risky = await isRiskyConnection(ip);
+    const verified = isIpTurnstileVerified(ip);
+
+    return res.status(200).json({
+      requiresTurnstile: risky && !verified,
+      reason: risky ? "vpn" : null,
+    });
+  } catch (e) {
+    console.error("security.getRisk error: ", e);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 const verifyTurnstile = async (req, res) => {
   try {
-    const { token, scope } = req.body || {};
-
-    if (!ALLOWED_SCOPES.has(scope)) {
-      return res.status(400).json({ message: "Invalid Turnstile scope" });
-    }
+    const ip = getClientIp(req);
+    const { token } = req.body || {};
 
     const result = await verifyTurnstileToken({
       token,
-      remoteIp: req.ip,
+      remoteIp: ip,
     });
 
     if (!result.success) {
       return res.status(400).json({
+        code: "TURNSTILE_FAILED",
         message: "Turnstile verification failed",
         errorCodes: result.errorCodes,
       });
     }
 
-    const sessionToken = issueTurnstileSession({
-      userId: req.user?.id ?? "anonymous",
-      scope,
-    });
+    markIpTurnstileVerified(ip);
 
-    return res.status(200).json({
-      token: sessionToken,
-      expiresIn: TURNSTILE_SESSION_TTL_SECONDS,
-      scope,
-    });
+    return res.status(200).json({ success: true });
   } catch (e) {
     console.error("security.verifyTurnstile error: ", e);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-module.exports = { verifyTurnstile };
+module.exports = { getRisk, verifyTurnstile };
